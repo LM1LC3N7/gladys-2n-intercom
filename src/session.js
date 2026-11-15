@@ -169,6 +169,7 @@ export class Session {
     for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);
     this.followTimers.clear();
     this.currentRead?.abort();
+    this.listenController?.abort();
     this.stopController.abort();
   }
 
@@ -251,7 +252,7 @@ export class Session {
     const kind = err?.kind ?? 'answer';
     this.stopListening();
     if (kind === 'refused') {
-      this.refused();
+      this.confirmRefusal();
       return undefined;
     }
     if (kind === 'nopin') {
@@ -280,6 +281,57 @@ export class Session {
       this.app.timings.downMax,
       this.app.config.pollMs * 2 ** Math.min(this.failures - 1, 10),
     );
+  }
+
+  /**
+   * A refusal of the identity read is kept only when a second identity read,
+   * made alone (channel cut, no reading, commands done), is refused too ("at
+   * the second case in a row"): two requests in flight against a device that
+   * keeps one nonce may lose a race without any wrong password.
+   * -> 'refused' (kept), 'accepted', or 'failed' (another error).
+   */
+  confirmRefusal() {
+    if (this.checking) return this.checking;
+    this.app.timers.clearTimeout(this.timer);
+    this.timer = undefined;
+    this.stopListening();
+    this.currentRead?.abort();
+    for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);
+    this.followTimers.clear();
+    this.checking = (async () => {
+      try {
+        await this.commandChain;
+        if (this.stopped) return 'failed';
+        try {
+          const answer = await this.app.request(
+            this.requestOptions({
+              path: PATHS.info,
+              timeout: this.app.timings.readTimeout,
+              signal: this.stopController.signal,
+            }),
+          );
+          parseInfo(parseAnswer(answer));
+        } catch (err) {
+          if (this.stopped) return 'failed';
+          if (err?.kind === 'refused') {
+            this.refused();
+            return 'refused';
+          }
+          this.checking = undefined;
+          const next = this.readFailed(err);
+          if (next !== undefined && this.timer === undefined) this.schedule(next);
+          return 'failed';
+        }
+        // Accepted alone: it was a race, nothing is kept; read again now.
+        this.app.logger.warn(`Credentials of ${this.host.key} accepted on a second try`);
+        this.checking = undefined;
+        this.schedule(0);
+        return 'accepted';
+      } finally {
+        this.checking = undefined;
+      }
+    })();
+    return this.checking;
   }
 
   refused() {
@@ -451,14 +503,17 @@ export class Session {
   // --- event channel ---------------------------------------------------------
 
   startListening() {
-    if (this.listening || this.stopped) return;
+    if (this.listening || this.stopped || this.checking) return;
     this.listening = true;
+    this.listenController = new AbortController();
     this.listenFailures = 0;
     this.scheduleListen(0);
   }
 
   stopListening() {
     this.listening = false;
+    // A held channel read is cut (a refusal is confirmed with no other request out).
+    this.listenController?.abort();
     this.app.timers.clearTimeout(this.listenTimer);
     this.listenTimer = undefined;
     this.channel = undefined;
@@ -494,7 +549,7 @@ export class Session {
           this.requestOptions({
             path: PATHS.subscribe(),
             timeout: this.app.timings.readTimeout,
-            signal: this.stopController.signal,
+            signal: this.listenController.signal,
           }),
         );
         if (this.stopped || !this.listening || serial !== this.identity?.serial) return;
@@ -507,7 +562,7 @@ export class Session {
           this.requestOptions({
             path: PATHS.pull(channel),
             timeout: this.app.timings.pullSeconds * 1000 + this.app.timings.readTimeout,
-            signal: this.stopController.signal,
+            signal: this.listenController.signal,
           }),
         );
         if (this.stopped || !this.listening || channel !== this.channel) return;
@@ -676,6 +731,7 @@ export class Session {
     };
     if (!this.app.config.allowOpen) refuse(T.openDisabled);
     if (this.state === 'refused') refuse(T.credentialsRefused);
+    if (this.checking) refuse(T.checkingReason);
     if (!this.pins().length) refuse(T.untrustedReason);
     if (this.waiting >= LIMITS.commandQueue) refuse(T.queueFull);
     const deadline = received + this.app.timings.commandBudget;
@@ -735,7 +791,7 @@ export class Session {
       try {
         info = parseInfo(parseAnswer(await this.commandRequest(PATHS.info, step())));
       } catch (err) {
-        if (err?.kind === 'refused') this.refused();
+        if (err?.kind === 'refused') this.confirmRefusal();
         notSent(reasonOf(err));
       }
       if (info.serial !== this.identity.serial) notSent(T.otherDevice);
@@ -916,8 +972,9 @@ export class Session {
       return T.testOk(this.host.key, info.model, info.serial.toUpperCase());
     } catch (err) {
       if (err?.kind === 'refused') {
-        this.refused();
-        return T.refused(this.host.key);
+        const outcome = await this.confirmRefusal();
+        if (outcome === 'refused') return T.refused(this.host.key);
+        return outcome === 'accepted' ? T.starting(this.host.key) : T.down(this.host.key);
       }
       if (err?.kind === 'pin') {
         this.seen = err.fingerprint;

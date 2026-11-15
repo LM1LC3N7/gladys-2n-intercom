@@ -94,11 +94,14 @@ ouvrirait la porte sur ce déclencheur ne boucle pas).
 
 ## Bon à savoir
 
-- **Identifiants refusés** (401 sur la lecture de l'identité) : l'interphone n'est plus sollicité,
+- **Identifiants refusés** (401 sur la lecture de l'identité, confirmé par une seconde lecture faite seule) : l'interphone n'est plus sollicité,
   même après un redémarrage, tant que vous ne changez pas les identifiants, n'enregistrez pas la
   configuration ou ne cliquez pas sur **Tester la connexion**. Un refus sur une autre fonction (droit
   absent) n'est pas un refus d'identifiants : cette fonction est redemandée après 1 min, puis en
   doublant jusqu'à 1 h.
+- Une ouverture n'est « confirmée » que si l'état du relais a pu être lu juste avant elle. Au-delà d'environ
+  650 ms par réponse de l'interphone, cette lecture est sautée pour laisser le temps à l'ouverture : elle
+  part quand même, mais n'est qu'« acceptée ».
 - Le canal d'événements est réouvert après une coupure ; les événements survenus pendant la coupure
   sont perdus, et une lecture du canal arrivée après un long silence (plus de 90 s) est ignorée pour ne
   pas publier d'anciens événements. Les états sont corrigés par la lecture suivante.

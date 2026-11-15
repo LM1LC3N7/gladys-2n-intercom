@@ -89,10 +89,13 @@ this trigger does not loop).
 
 ## Good to know
 
-- **Credentials refused** (401 on the identity): the intercom is not asked again, even after a
+- **Credentials refused** (401 on the identity, confirmed by a second read made alone): the intercom is not asked again, even after a
   restart, until you change the credentials, save the configuration or click **Test the connection**.
   A refusal on another function (missing privilege) is no credentials refusal: that function is asked
   again after 1 min, then doubling up to 1 h.
+- An activation is "confirmed" only when the state of the switch could be read right before it. Beyond
+  about 650 ms per answer of the intercom, that read is skipped to leave the activation its time: it still
+  goes, but is only "accepted".
 - The event channel is opened again after a cut; events during the cut are lost, and a channel read
   arriving after a long silence (over 90 s) is ignored, so old events are never published. The states
   are corrected by the next reading.

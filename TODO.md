@@ -39,7 +39,9 @@
   changed credentials, a saved configuration or the test button). A 401 is judged against the challenge
   that request signed with (review r1, I2): a changed nonce is answered once; at the second round a new
   nonce is ignored only with `stale=true`, otherwise it is a refusal (RFC 7616, servers that give a new
-  nonce at every 401; review r2, R1); the shared challenge is cleared only if still that one. No credentials sent
+  nonce at every 401; review r2, R1). One Digest renewal at a time per intercom; a request whose 401
+  raced another one's is answered once more (review r3, I1). A refusal of the identity is kept only when
+  a second identity read, made alone (channel cut, no reading, commands done), is refused too; the shared challenge is cleared only if still that one. No credentials sent
   (none configured, auth-int, unknown algorithm) = `method` (M1). Error 9 without a 401 = unexpected
   answer. A 401 carrying error 10, a 403, a 401 elsewhere (switch, I/O, call, log, trigger) is never a
   refusal: "not allowed" for that endpoint, asked again after 1 min doubling to 1 h. Digest configured

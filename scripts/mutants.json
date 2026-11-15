@@ -248,8 +248,8 @@
   {
     "name": "R12 stop leaves follow-up timers",
     "file": "src/session.js",
-    "from": "for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);",
-    "to": "void 0;"
+    "from": "    this.listenTimer = undefined;\n    for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);",
+    "to": "    this.listenTimer = undefined;"
   },
   {
     "name": "R13 confirmed although active before",
@@ -356,8 +356,8 @@
   {
     "name": "I2 challenge of another request cleared",
     "file": "src/http.js",
-    "from": "} else if (auth.mode === 'digest' && session.challenge === used)",
-    "to": "} else if (auth.mode === 'digest')"
+    "from": "if (!fresh && auth.mode === 'digest' && session.challenge === used) {",
+    "to": "if (!fresh && auth.mode === 'digest') {"
   },
   {
     "name": "M1 refused without credentials sent",
@@ -390,12 +390,6 @@
     "to": "    void 0;"
   },
   {
-    "name": "F1 second-round new nonce without stale taken for a nonce change",
-    "file": "src/http.js",
-    "from": "if (fresh && (round === 0 || stale)) {",
-    "to": "if (fresh) {"
-  },
-  {
     "name": "N2 mark kept when nothing left",
     "file": "src/session.js",
     "from": "        unmark();\n        notSent(reasonOf(err));",
@@ -418,5 +412,47 @@
     "file": "src/session.js",
     "from": "    if (remaining() > this.app.timings.beforeReadMin) {",
     "to": "    if (true) {"
+  },
+  {
+    "name": "F1 a later-round new nonce without stale never refused",
+    "file": "src/http.js",
+    "from": "if (fresh && raced && round === 1 && headers.Authorization) continue;",
+    "to": "if (fresh && round === 1 && headers.Authorization) continue;"
+  },
+  {
+    "name": "F2 stale=true at a later round taken for a refusal",
+    "file": "src/http.js",
+    "from": "      if (fresh && stale) {",
+    "to": "      if (false) {"
+  },
+  {
+    "name": "I1r3 race with another 401 not seen",
+    "file": "src/http.js",
+    "from": "const raced = session.seen401 - seenBefore > 1;",
+    "to": "const raced = false;"
+  },
+  {
+    "name": "I1r3 renewals not serialized",
+    "file": "src/http.js",
+    "from": "        if (!session.renewing) {",
+    "to": "        if (false) {"
+  },
+  {
+    "name": "I1r3 refusal kept without a second identity read",
+    "file": "src/session.js",
+    "from": "    if (kind === 'refused') {\n      this.confirmRefusal();",
+    "to": "    if (kind === 'refused') {\n      this.refused();"
+  },
+  {
+    "name": "N18 /data read slot never freed",
+    "file": "src/store.js",
+    "from": "this.clearReading(reading);",
+    "to": "void 0;"
+  },
+  {
+    "name": "N19 before-read budget eats the trigger reserve",
+    "file": "src/session.js",
+    "from": "remaining() - this.app.timings.triggerReserve",
+    "to": "remaining()"
   }
 ]

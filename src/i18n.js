@@ -129,6 +129,7 @@ export const T = {
   notButton: t('cette fonctionnalité n’est pas une commande', 'this feature is not a command'),
   badValue: t('valeur inattendue', 'unexpected value'),
   credentialsRefused: t('identifiants refusés', 'credentials refused'),
+  checkingReason: t('identifiants en cours de vérification', 'credentials being checked'),
   refusedReason: t('refus de l’interphone (401)', 'refused by the intercom (401)'),
   untrustedReason: t('certificat pas encore approuvé', 'certificate not trusted yet'),
   pinReason: t(

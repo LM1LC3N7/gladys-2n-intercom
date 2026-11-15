@@ -316,12 +316,41 @@ export async function request({
   if (signal?.aborted) controller.abort();
   signal?.addEventListener('abort', forward, { once: true });
   let sentOnce = false;
+  // One Digest renewal at a time per intercom (`session.renewing`): a
+  // request that gets a new challenge while another one is renewing waits
+  // for its outcome instead of racing it (a device that keeps ONE nonce and
+  // replaces it at every 401 would refuse one of them).
+  let renewer = false;
+  let release;
+  const waitRenewal = async () => {
+    while (auth.mode === 'digest' && session.renewing && !renewer) {
+      await new Promise((resolve, reject) => {
+        const onAbort = () => reject(new IntercomError('Taken back', 'aborted'));
+        if (controller.signal.aborted) {
+          onAbort();
+          return;
+        }
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        session.renewing.then(() => {
+          controller.signal.removeEventListener('abort', onAbort);
+          resolve();
+        });
+      });
+    }
+  };
   try {
-    for (let round = 0; round < 2; round += 1) {
+    for (let round = 0; round < 3; round += 1) {
+      try {
+        await waitRenewal();
+      } catch (err) {
+        throw timedOut ? new IntercomError('Connection timed out', 'offline') : err;
+      }
       const headers = {};
       // The challenge this round signs with (shared with other requests in
       // flight, which may replace it meanwhile): a 401 is judged against it.
       const used = auth.mode === 'digest' ? session.challenge : undefined;
+      // The 401s this session saw before this round left.
+      const seenBefore = session.seen401 ?? 0;
       if (auth.mode === 'basic') {
         headers.Authorization = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
       } else if (auth.mode === 'digest' && used) {
@@ -362,6 +391,10 @@ export async function request({
       if (answer.status !== 401) return answer;
       // Authenticated, without the privilege of this function: an answer.
       if (errorCode(answer.text) === 10) return answer;
+      session.seen401 = (session.seen401 ?? 0) + 1;
+      // Another request of this intercom got a 401 while this round was out:
+      // the device may have replaced the nonce this round signed with.
+      const raced = session.seen401 - seenBefore > 1;
       // 401: nothing was done. With Digest, a first, stale or changed
       // challenge (compared with the one THIS round signed with) is answered
       // once; a refusal is only a 401 to a request that carried credentials.
@@ -372,20 +405,30 @@ export async function request({
         digest?.nonce &&
         (!used || String(digest.stale).toLowerCase() === 'true' || digest.nonce !== used.nonce);
       const stale = String(digest?.stale).toLowerCase() === 'true';
-      if (fresh && (round === 0 || stale)) {
+      if (fresh) {
+        // The newest challenge of the device wins.
         session.challenge = digest;
         session.nc = 0;
-        if (round === 0) continue;
+      }
+      if (fresh && round === 0) {
+        if (!session.renewing) {
+          renewer = true;
+          session.renewing = new Promise((resolve) => (release = resolve));
+        }
+        continue;
+      }
+      if (fresh && stale) {
+        if (round < 2) continue;
         // Our proof was only out of date (stale=true): nothing judged.
         throw new IntercomError('The device changed its nonce', 'device', { status: 401 });
       }
-      // A second round answered with a new nonce WITHOUT stale=true rejects
-      // the proof (RFC 7616: many servers give a new nonce at every 401).
-      if (fresh) {
-        session.challenge = digest;
-        session.nc = 0;
-      } else if (auth.mode === 'digest' && session.challenge === used)
+      // A later round answered with a new nonce WITHOUT stale=true rejects
+      // the proof (RFC 7616: many servers give a new nonce at every 401),
+      // unless another request's 401 raced it: then once more, last time.
+      if (fresh && raced && round === 1 && headers.Authorization) continue;
+      if (!fresh && auth.mode === 'digest' && session.challenge === used) {
         session.challenge = undefined;
+      }
       if (auth.mode === 'digest' && !digest && challenges.basic) {
         throw new IntercomError('The device asks for Basic', 'basic-only', { status: 401 });
       }
@@ -396,7 +439,7 @@ export async function request({
       }
       throw new IntercomError('Credentials refused', 'refused', { status: 401 });
     }
-    throw new IntercomError('No answer', 'answer'); // never reached: each round returns or throws
+    throw new IntercomError('Credentials refused', 'refused', { status: 401 });
   } catch (err) {
     // A 401 reached the device but did nothing: every error built above for
     // a 401 is "not sent" (the IntercomError default).
@@ -405,5 +448,9 @@ export async function request({
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', forward);
+    if (renewer) {
+      session.renewing = undefined;
+      release();
+    }
   }
 }

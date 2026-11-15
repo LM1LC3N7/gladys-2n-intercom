@@ -7,7 +7,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:https';
-import { request as realRequest } from '../src/http.js';
+import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { IntercomError, request as realRequest } from '../src/http.js';
 import { FileStore, MemoryStore, emptyData } from '../src/store.js';
 import { CERTS, FP, PASSWORD, USER, startFake2N } from './helpers/fake2n.js';
 import { D, F, press, setup, sleep, until, within } from './helpers/app.js';
@@ -552,4 +555,167 @@ test('a trigger answered 401 without proof (method): "nothing sent", no mark (N1
   const ack = await press(s.gladys, 1);
   assert.match(ack.error, /rien envoyé \(authentification non acceptée\)/);
   assert.equal(s.session().ownOpens.length, 0);
+});
+
+// --- review r3 ----------------------------------------------------------------------
+
+test('one nonce replaced at every 401, expired, 2 and 3 requests in flight: never refused (I1 r3)', async (t) => {
+  const fake = await startFake2N({ nonceEach401: true });
+  t.after(() => fake.close());
+  const host = { address: '127.0.0.1', port: fake.port, key: fake.host };
+  const session = {};
+  const auth = { mode: 'digest', username: USER, password: PASSWORD };
+  const o = (path) => ({ host, pins: [FP], auth, session, path, timeout: 3000 });
+  for (let i = 0; i < 10; i += 1) {
+    await realRequest(o('/api/system/info'));
+    fake.nonce = `expired${i}abcdef01`;
+    const paths = ['/api/switch/status', '/api/system/info', '/api/io/status'].slice(
+      0,
+      2 + (i % 2),
+    );
+    const results = await Promise.allSettled(paths.map((p) => realRequest(o(p))));
+    assert.deepEqual(
+      results.map((r) => (r.status === 'fulfilled' ? r.value.status : r.reason.kind)),
+      paths.map(() => 200),
+      `run ${i}`,
+    );
+  }
+  assert.equal(session.renewing, undefined);
+  // A wrong password is still refused.
+  await assert.rejects(
+    realRequest({ ...o('/api/system/info'), session: {}, auth: { ...auth, password: 'bad' } }),
+    { kind: 'refused' },
+  );
+});
+
+test('one nonce replaced at every 401, expired, cycle and channel together: the session stays up (I1 r3)', async (t) => {
+  const s = await setup(t, { fake: { nonceEach401: true } });
+  await s.ready();
+  await events(s, () => s.session().channel !== undefined, 'channel');
+  for (let i = 0; i < 6; i += 1) {
+    s.fake.nonce = `exp${i}abcdef0123456`;
+    s.session().scheduleListen(0);
+    s.session().schedule(0);
+    await s.step(0);
+    await sleep(150);
+    await until(() => !s.session().currentRead && !s.session().checking, 3000);
+    assert.equal(s.session().state, 'ok', `run ${i}`);
+    assert.notEqual(s.session().ep.events.state, 'denied', `run ${i}`);
+  }
+  assert.deepEqual(s.store.data.refused, {});
+});
+
+test('a refusal is kept only when a second identity read, alone, is refused too (I1 r3)', async (t) => {
+  let fail = 1;
+  const s = await setup(t, {
+    request: (options) => {
+      if (options.path === '/api/system/info' && fail > 0) {
+        fail -= 1;
+        return Promise.reject(new IntercomError('Credentials refused', 'refused', { status: 401 }));
+      }
+      return realRequest(options);
+    },
+  });
+  await s.step(0);
+  await until(() => fail === 0);
+  await s.advanceUntil(() => s.session().state === 'ok' && s.session().caps.size > 0, {
+    ms: 20_000,
+    every: 500,
+  });
+  assert.deepEqual(s.store.data.refused, {});
+  assert.ok(s.lines.some((l) => /accepted on a second try/.test(l)));
+});
+
+test('a second round answered stale=true is no refusal (F2)', async (t) => {
+  let n = 0;
+  const server = createServer({ key: CERTS.device.key, cert: CERTS.device.cert }, (req, res) => {
+    n += 1;
+    if (n === 1) {
+      res.writeHead(401, {
+        'WWW-Authenticate': 'Digest realm="HTTP API", qop="auth", nonce="a1", algorithm=MD5',
+      });
+      res.end('{"success":false,"error":{"code":9}}');
+    } else if (n === 2) {
+      res.writeHead(401, {
+        'WWW-Authenticate':
+          'Digest realm="HTTP API", qop="auth", nonce="b2", algorithm=MD5, stale=true',
+      });
+      res.end('{"success":false,"error":{"code":9}}');
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"success":true,"result":{}}');
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const answer = await realRequest({
+    host: { address: '127.0.0.1', port: server.address().port, key: 'x' },
+    pins: [FP],
+    path: '/api/system/info',
+    auth: { mode: 'digest', username: 'u', password: 'p' },
+    session: {},
+    timeout: 3000,
+  });
+  assert.equal(answer.status, 200);
+  assert.equal(n, 3);
+});
+
+test('a real /data file read slowly once is read on the next try (N18)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), '2n-intercom-store-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, '2n-intercom.json'), JSON.stringify({ ...emptyData(), pins: {} }));
+  let opens = 0;
+  const store = new FileStore({
+    dir,
+    timeout: 50,
+    openFile: async (...args) => {
+      opens += 1;
+      if (opens === 1) await sleep(150);
+      return open(...args);
+    },
+  });
+  assert.equal((await store.load()).state, 'unreadable');
+  await sleep(200); // the slow read ends, its slot is freed
+  assert.equal((await store.load()).state, 'ok');
+  assert.equal(opens, 2);
+});
+
+test('the read before an opening leaves the trigger its reserve (N19)', async (t) => {
+  let statusTimeout;
+  let commanding = false;
+  const s = await setup(t, {
+    request: (options, clock) => {
+      // Identity and capabilities of the command take 600 ms each (virtual).
+      if (commanding && ['/api/system/info', '/api/switch/caps'].includes(options.path)) {
+        clock.now += 600;
+      }
+      if (options.path === '/api/switch/status?switch=1') statusTimeout ??= options.timeout;
+      return realRequest(options);
+    },
+  });
+  await s.ready();
+  commanding = true;
+  const ack = await press(s.gladys, 1);
+  assert.ok(ack.success || /accepté/.test(ack.error), JSON.stringify(ack));
+  assert.ok(statusTimeout !== undefined, 'the state was read before');
+  assert.ok(statusTimeout <= 3300 - 1200 - 1100 + 5, `budget ${statusTimeout}`);
+});
+
+test('stop() takes back a command waiting on a slow intercom at once (R11)', async (t) => {
+  const s = await setup(t);
+  await s.ready();
+  s.fake.latency['/api/switch/caps'] = 2000;
+  const started = Date.now();
+  const pending = press(s.gladys, 1);
+  await until(() =>
+    s.fake.requests.some(
+      (r) => r.path === '/api/switch/caps' && r.authorized && s.session().waiting,
+    ),
+  );
+  await s.app.stop();
+  const ack = await pending;
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /rien envoyé/);
+  assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
+  assert.equal(triggers(s.fake).length, 0);
 });
