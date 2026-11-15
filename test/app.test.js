@@ -207,9 +207,15 @@ test('activation: identity and capabilities read right before, trigger, confirme
     .filter((r) => r.authorized && !r.path.startsWith('/api/log'));
   assert.deepEqual(
     after.map((r) => r.path),
-    ['/api/system/info', '/api/switch/caps', '/api/switch/ctrl', '/api/switch/status'],
+    [
+      '/api/system/info',
+      '/api/switch/caps',
+      '/api/switch/status',
+      '/api/switch/ctrl',
+      '/api/switch/status',
+    ],
   );
-  assert.deepEqual(after[2].query, { switch: '1', action: 'trigger' });
+  assert.deepEqual(after[3].query, { switch: '1', action: 'trigger' });
   assert.equal(s.gladys.fake.lastState(F('switch-1:state')), 0);
   assert.ok(s.lines.some((l) => /Opening .* switch 1: accepted/.test(l)));
 });

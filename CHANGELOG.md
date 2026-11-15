@@ -22,4 +22,5 @@ the notes of the version's GitHub Release.
   activated, access granted, access denied.
 - Refused credentials kept in `/data` (a salted 8-bit fingerprint) so an
   intercom is not asked again in a loop; lifted by new credentials, a saved
-  configuration or the test button.
+  configuration or the test button; `/data` read again every 10 s while
+  unreadable.

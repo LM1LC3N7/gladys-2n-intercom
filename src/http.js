@@ -319,13 +319,16 @@ export async function request({
   try {
     for (let round = 0; round < 2; round += 1) {
       const headers = {};
+      // The challenge this round signs with (shared with other requests in
+      // flight, which may replace it meanwhile): a 401 is judged against it.
+      const used = auth.mode === 'digest' ? session.challenge : undefined;
       if (auth.mode === 'basic') {
         headers.Authorization = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
-      } else if (auth.mode === 'digest' && session.challenge) {
+      } else if (auth.mode === 'digest' && used) {
         session.nc = (session.nc ?? 0) + 1;
         const value = digestHeader(
           auth,
-          session.challenge,
+          used,
           method,
           path,
           session.nc,
@@ -359,34 +362,38 @@ export async function request({
       if (answer.status !== 401) return answer;
       // Authenticated, without the privilege of this function: an answer.
       if (errorCode(answer.text) === 10) return answer;
-      // 401: nothing was done. With Digest, a first or stale challenge is
-      // answered once; anything else is a refusal.
+      // 401: nothing was done. With Digest, a first, stale or changed
+      // challenge (compared with the one THIS round signed with) is answered
+      // once; a refusal is only a 401 to a request that carried credentials.
       const challenges = parseChallenges(answer.headers['www-authenticate']);
       const digest = challenges.digest;
       const fresh =
         auth.mode === 'digest' &&
         digest?.nonce &&
-        (!session.challenge ||
-          String(digest.stale).toLowerCase() === 'true' ||
-          digest.nonce !== session.challenge.nonce);
-      if (round === 0 && fresh) {
+        (!used || String(digest.stale).toLowerCase() === 'true' || digest.nonce !== used.nonce);
+      if (fresh) {
         session.challenge = digest;
         session.nc = 0;
-        continue;
+        if (round === 0) continue;
+        // The nonce changed again: no proof of the password was judged.
+        throw new IntercomError('The device changed its nonce', 'device', { status: 401 });
       }
-      if (auth.mode === 'digest') session.challenge = undefined;
-      const basicOnly = auth.mode === 'digest' && !digest && challenges.basic;
-      throw new IntercomError(
-        basicOnly ? 'The device asks for Basic' : 'Credentials refused',
-        basicOnly ? 'basic-only' : 'refused',
-        { status: 401 },
-      );
+      if (auth.mode === 'digest' && session.challenge === used) session.challenge = undefined;
+      if (auth.mode === 'digest' && !digest && challenges.basic) {
+        throw new IntercomError('The device asks for Basic', 'basic-only', { status: 401 });
+      }
+      if (!headers.Authorization) {
+        // None configured, or a challenge this client cannot answer (auth-int,
+        // another algorithm): no credentials were sent, so none was refused.
+        throw new IntercomError('Authentication not supported', 'method', { status: 401 });
+      }
+      throw new IntercomError('Credentials refused', 'refused', { status: 401 });
     }
-    throw new IntercomError('Credentials refused', 'refused', { status: 401 });
+    throw new IntercomError('No answer', 'answer'); // never reached: each round returns or throws
   } catch (err) {
     if (err instanceof IntercomError) {
       // A 401 round reached the device but did nothing: only the last round counts.
-      if (err.kind === 'refused' || err.kind === 'basic-only') err.sent = false;
+      if (err.status === 401) err.sent = false;
       throw err;
     }
     throw new IntercomError('Request failed', 'offline', { sent: sentOnce });

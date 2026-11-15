@@ -592,8 +592,13 @@ export class Session {
       this.switches.set(e.n, { ...current, active: e.active });
       if (this.caps.get(e.n)?.enabled) this.app.publishState(this, key, e.active ? 0 : 1);
       if (!e.active) return;
-      if (e.originator === 'api' && this.consumeOwnOpen(e.n)) {
-        this.commandConfirmed(e.n);
+      const own = e.originator === 'api' ? this.consumeOwnOpen(e.n) : undefined;
+      if (own) {
+        // Confirms the opening only when the switch was read inactive before it.
+        if (own.before === false) {
+          own.confirmed = true;
+          this.commandConfirmed(e.n);
+        }
         return;
       }
       this.app.sceneEvent(TRIGGERS.SWITCH, {
@@ -634,20 +639,24 @@ export class Session {
   /**
    * The activation an opening from Gladys made is not an event (a scene
    * opening the door on "switch activated" would loop): one activation by
-   * the API per opening, on its switch, within 30 s.
+   * the API per opening, on its switch, within 30 s of its first byte. The
+   * mark is set before that byte, so the event may come before the answer.
+   * -> the mark, or undefined.
    */
   consumeOwnOpen(n) {
     const mono = this.mono;
     this.ownOpens = this.ownOpens.filter((o) => mono - o.at <= this.app.timings.ownOpenMax);
     const index = this.ownOpens.findIndex((o) => o.n === n);
-    if (index === -1) return false;
-    this.ownOpens.splice(index, 1);
-    return true;
+    if (index === -1) return undefined;
+    const [mark] = this.ownOpens.splice(index, 1);
+    return mark;
   }
 
-  markOwnOpen(n, at) {
-    this.ownOpens.push({ n, at });
+  markOwnOpen(n, at, before) {
+    const mark = { n, at, before, confirmed: false };
+    this.ownOpens.push(mark);
     if (this.ownOpens.length > LIMITS.ownOpens) this.ownOpens.shift();
+    return mark;
   }
 
   commandConfirmed(n) {
@@ -756,11 +765,30 @@ export class Session {
     if (caps.duration > LIMITS.maxSwitchOnSeconds) {
       notSent(T.tooLong(caps.duration, LIMITS.maxSwitchOnSeconds));
     }
-    const before = this.switches.get(n)?.active;
+    // The state of the switch, read right before (never the one in memory):
+    // a switch already active is never reported confirmed. Unreadable: the
+    // opening goes, but can only be reported "accepted".
+    if (remaining() < 100) notSent(T.tooLate);
+    let before;
+    try {
+      const status = parseSwitchStatus(
+        parseAnswer(await this.commandRequest(PATHS.switchStatusOf(n), step())),
+      );
+      before = status.get(n)?.active;
+    } catch (err) {
+      if (err?.kind === 'aborted') notSent(T.stopped);
+      before = undefined;
+    }
     if (remaining() < 100) notSent(T.tooLate);
 
-    // 3. The trigger: the switch turns off by itself after its duration.
-    const sentAt = this.mono;
+    // 3. The trigger: the switch turns off by itself after its duration. The
+    // mark of this opening is set right before the first byte (the device may
+    // report the activation on the event channel before the answer comes),
+    // and taken back when nothing left or the device refused.
+    let mark;
+    const unmark = () => {
+      this.ownOpens = this.ownOpens.filter((o) => o !== mark);
+    };
     let answer;
     try {
       answer = await this.commandRequest(PATHS.trigger(n), step(), {
@@ -777,14 +805,17 @@ export class Session {
           if (this.mono >= deadline) {
             return Object.assign(new IntercomError('Too late', 'withdrawn'), { reason: T.tooLate });
           }
+          if (!mark) mark = this.markOwnOpen(n, this.mono, before);
           return true;
         },
       });
     } catch (err) {
       // A 401 here is reported, never taken for refused credentials (the
       // identity, read just before, is where credentials are judged).
-      if (!err?.sent) notSent(reasonOf(err));
-      this.markOwnOpen(n, sentAt);
+      if (!err?.sent) {
+        unmark();
+        notSent(reasonOf(err));
+      }
       this.followUp(n, before);
       this.app.logger.info(`Opening ${this.host.key} switch ${n}: sent, no answer`);
       fail(T.sentUnconfirmed(n));
@@ -792,15 +823,16 @@ export class Session {
     try {
       parseAnswer(answer);
     } catch (err) {
+      unmark();
       if (err?.kind === 'privilege') fail(T.notSent(n, T.privilegeReason));
       if (err?.kind === 'disabled') fail(T.notSent(n, T.disabledReason));
       fail(T.rejectedByDevice(n));
     }
-    this.markOwnOpen(n, sentAt);
     this.app.logger.info(`Opening ${this.host.key} switch ${n}: accepted by the device`);
 
-    // 4. Read back: confirmed only when active after being inactive.
-    if (remaining() > 150) {
+    // 4. Read back: confirmed only when active after being read inactive
+    // right before, or when the device reported this activation by the API.
+    if (!mark.confirmed && remaining() > 150) {
       try {
         const seq = this.eventSeq;
         const status = parseSwitchStatus(
@@ -813,17 +845,14 @@ export class Session {
             this.app.publishState(this, switchKey(n, 'state'), active ? 0 : 1);
           }
         }
-        if (before === false && active === true) {
-          this.lastCommand = T.confirmed(n);
-          this.app.refreshStatus();
-          return this.lastCommand;
-        }
+        if (before === false && active === true) mark.confirmed = true;
       } catch {
         // Read back later.
       }
     }
-    if (this.lastCommand?.en === T.confirmed(n).en && this.ownOpens.every((o) => o.n !== n)) {
-      // Confirmed meanwhile by the event channel.
+    if (mark.confirmed) {
+      this.lastCommand = T.confirmed(n);
+      this.app.refreshStatus();
       return this.lastCommand;
     }
     this.followUp(n, before);

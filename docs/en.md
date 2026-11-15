@@ -20,7 +20,7 @@ For each intercom:
   access denied" (with the name of the directory user, the direction `entry` or `exit`, and the reason
   of a refusal).
 
-Codes typed, card numbers and user ids are never read nor published.
+Codes typed, card numbers and user ids are never published nor kept.
 
 ## Prepare the intercom
 

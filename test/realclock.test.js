@@ -154,3 +154,58 @@ test('real clock: an intercom answering in 4 s is never activated late ("nothing
   await sleep(200);
   assert.equal(fake.count('/api/switch/ctrl'), 0);
 });
+
+test('real clock: an activation while a channel read is held is never a "switch activated" event (I1)', async (t) => {
+  for (const latency of [0, 200]) {
+    const fake = await startFake2N({ auth: 'none' });
+    fake.pullHoldMs = 3000; // a real device holds the read up to 20 s
+    fake.latency['/api/switch/ctrl'] = latency;
+    t.after(() => fake.close());
+    const { gladys, app } = realApp(t, [fake], 1);
+    await within(gladys.connect(), 5000);
+    await until(
+      () => [...app.sessions.values()].every((s) => s.state === 'ok' && s.caps.size),
+      5000,
+    );
+    await until(() => fake.requests.some((r) => r.path === '/api/log/pull'), 5000);
+    await sleep(100);
+    const ack = await within(
+      gladys.fake.setValue(
+        { external_id: 'ext:2n-intercom:2n:54-0123-4567' },
+        { external_id: 'ext:2n-intercom:2n:54-0123-4567:switch-1:open' },
+        1,
+      ),
+      6000,
+    );
+    assert.equal(ack.success, true, ack.error);
+    await sleep(300);
+    const session = [...app.sessions.values()][0];
+    assert.equal(gladys.fake.sceneEvents.filter((e) => e.key === 'switch_activated').length, 0);
+    assert.equal(session.ownOpens.length, 0, 'the mark was taken by its own event');
+    await app.stop();
+  }
+});
+
+test('real clock: the trigger step keeps to the deadline, the ack comes in time (R15)', async (t) => {
+  const fake = await startFake2N({ auth: 'none' });
+  t.after(() => fake.close());
+  const { gladys, app } = realApp(t, [fake], 1);
+  await within(gladys.connect(), 5000);
+  await until(() => [...app.sessions.values()].every((s) => s.state === 'ok' && s.timer), 5000);
+  fake.latency['/api/system/info'] = 900;
+  fake.latency['/api/switch/caps'] = 900;
+  fake.latency['/api/switch/status'] = 900;
+  fake.silent.add('/api/switch/ctrl');
+  const started = performance.now();
+  const ack = await within(
+    gladys.fake.setValue(
+      { external_id: 'ext:2n-intercom:2n:54-0123-4567' },
+      { external_id: 'ext:2n-intercom:2n:54-0123-4567:switch-1:open' },
+      1,
+    ),
+    7000,
+  );
+  const took = performance.now() - started;
+  assert.equal(ack.success, false);
+  assert.ok(took < 3600, `${Math.round(took)} ms`);
+});

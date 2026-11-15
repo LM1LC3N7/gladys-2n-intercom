@@ -126,7 +126,7 @@ test('answers: the envelope, the error codes, never a success without `success: 
     'disabled',
     'device',
     'method',
-    'refused',
+    'answer',
     'privilege',
     'answer',
     'answer',

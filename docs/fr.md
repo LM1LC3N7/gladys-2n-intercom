@@ -20,7 +20,7 @@ Pour chaque interphone :
   et « Accès 2N refusé » (avec le nom de l'utilisateur de l'annuaire, le sens `entry` ou `exit`, et le
   motif du refus).
 
-Les codes saisis, les numéros de badge et les identifiants d'utilisateur ne sont jamais lus ni publiés.
+Les codes saisis, les numéros de badge et les identifiants d'utilisateur ne sont jamais publiés ni gardés.
 
 ## Préparer l'interphone
 

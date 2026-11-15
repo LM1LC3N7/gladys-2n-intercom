@@ -50,7 +50,8 @@ export function kindOfCode(code) {
   if (code === 1 || code === 2 || code === 3) return 'unsupported';
   if (code === 4) return 'disabled';
   if (code === 8) return 'method';
-  if (code === 9) return 'refused';
+  // Error 9 without a 401 is no refusal of credentials (see http.js).
+  if (code === 9) return 'answer';
   if (code === 10) return 'privilege';
   if (code === 11 || code === 12 || code === 13 || code === 17) return 'answer';
   return 'device';

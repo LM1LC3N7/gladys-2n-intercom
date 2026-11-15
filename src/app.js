@@ -67,6 +67,7 @@ export class IntercomApp {
     this.discoveryQueued = false;
     this.published = new Map();
     this.pendingTrust = undefined;
+    this.dataTimer = undefined;
     this.stateLimiter = new RateLimiter(LIMITS.statesPerMinute);
     this.eventLimiter = new RateLimiter(LIMITS.eventsPerMinute);
   }
@@ -86,6 +87,50 @@ export class IntercomApp {
     if (this.data) return;
     this.data = data ?? emptyData();
     this.storeState = state;
+    if (state === 'unreadable') this.scheduleDataRetry();
+  }
+
+  /** /data unreadable (slow, a passing error): read again on a timer of its own, one read at a time. */
+  scheduleDataRetry() {
+    if (this.stopped || this.dataTimer !== undefined) return;
+    this.dataTimer = this.timers.setTimeout(() => {
+      this.dataTimer = undefined;
+      this.retryData().catch((err) => this.logger.warn('/data not read', err?.message));
+    }, this.timings.dataRetry);
+  }
+
+  async retryData() {
+    if (this.stopped || this.storeState !== 'unreadable') return;
+    let loaded;
+    try {
+      loaded = await this.store.load();
+    } catch {
+      loaded = { state: 'unreadable' };
+    }
+    if (this.stopped) return;
+    if (loaded.state === 'unreadable' || !loaded.data) {
+      this.scheduleDataRetry();
+      return;
+    }
+    // Readable now: its salt, pins and refusals are taken; a refusal seen in
+    // this run is kept (its mark made again with the salt of the file).
+    const seen = Object.keys(this.data.refused);
+    const data = loaded.data;
+    for (const key of seen) {
+      const session = this.sessions.get(key);
+      if (!session || data.refused[key]) continue;
+      data.refused[key] = {
+        fp: fingerprint(data.salt, key, this.config),
+        at: this.data.refused[key].at,
+      };
+    }
+    const keys = [...new Set([...Object.keys(data.pins), ...Object.keys(data.refused)])];
+    this.data = data;
+    this.storeState = loaded.state;
+    this.logger.info('/data read again');
+    if (seen.length) this.persist();
+    if (this.config) this.restart(false, keys);
+    this.refreshStatus();
   }
 
   async apply(raw, saved = false) {
@@ -146,6 +191,8 @@ export class IntercomApp {
 
   async stop() {
     this.stopped = true;
+    this.timers.clearTimeout(this.dataTimer);
+    this.dataTimer = undefined;
     for (const session of this.sessions.values()) session.stop();
     this.sessions.clear();
   }

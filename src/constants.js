@@ -61,6 +61,8 @@ export const TIMINGS = Object.freeze({
   trustWindow: 120_000,
   /** getConfig() failed: tried again after these delays (the last one repeats). */
   configRetry: [5000, 15_000, 30_000, 60_000],
+  /** /data unreadable: read again after this, one read at a time, until it is. */
+  dataRetry: 10_000,
   /** /data: a read or a write never waits longer. */
   storeTimeout: 2000,
 });
