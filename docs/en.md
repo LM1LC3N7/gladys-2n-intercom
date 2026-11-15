@@ -1,61 +1,105 @@
-# Demo Devices Template
+# 2N IP intercoms for Gladys
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+External integration for Gladys Assistant (5.1.0 or later) for the 2N IP intercoms and access units
+(Verso, Force, Safety, Solo, Style, Base, Access Unit...) on your local network, through their official
+HTTP API over HTTPS, without any cloud. **Unofficial, not affiliated with 2N. Never tested with a real device**: it is written from the "2N IP HTTP API" manual (version 3.3, firmware 2.50) and tested
+against a simulated intercom. Your feedback is welcome.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+For each intercom:
 
-## Configuration
+- **Doorbell** (read only): 1 while a visitor rings (the intercom starts an outgoing call), 0
+  otherwise;
+- **Switch n (state)** (read only), for each switch (1 to 4) enabled in the intercom: 0 active (lock
+  released), 1 at rest;
+- **Activate switch n**: a push button, **off by default** (see below);
+- **Input ...** (read only): the state of each digital input (door contact, exit button...);
+- **scene triggers**: "2N doorbell" (once per call), "2N switch activated" (with its number and the
+  origin as the intercom says it: `auth`, `ap`, `dtmf`, `automation`...), "2N access granted" and "2N
+  access denied" (with the name of the directory user, the direction `entry` or `exit`, and the reason
+  of a refusal).
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+Codes typed, card numbers and user ids are never read nor published.
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+## Prepare the intercom
 
-## Actions
+1. In the web page of the intercom, **Services > HTTP API**: enable the **System**, **Switch**,
+   **I/O**, **Phone/Call** and **Logging** services, each over **HTTPS** with **Digest**
+   authentication (the setting 2N recommends).
+2. On the same tab, create an **account** (5 at most) for Gladys, with the privileges: switch
+   monitoring and control, I/O monitoring, call monitoring, and, for the access events, UID (card)
+   monitoring. A missing privilege is no error: that part is only "not allowed" in the status, the
+   rest works.
+3. Give the intercom a fixed IP address in your router.
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+## Configure the integration
 
-## Scenes
+- **Addresses of the intercoms**: their IP addresses separated by commas (8 at most), with `:port`
+  when the HTTPS port is not 443.
+- **Authentication**, **user**, **password**: those of the account created above (the same on every
+  intercom). The password is kept by Gladys in its database, never shown again, and sent only to the
+  intercoms listed, once their certificate is trusted; with Digest, only a proof of it travels.
+- **Reading interval** (5 to 300 s, 10 by default): how often the switches, inputs and calls are read
+  again. Events arrive at once (the event channel of the intercom).
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+### Trust the certificate (required)
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+The intercom shows a certificate of its own, that no authority vouches for. **Nothing is sent to an
+intercom until its certificate is trusted**: the status then shows the SHA-256 fingerprint seen. To
+trust it:
 
-## Dashboard
+- click **Trust the certificates**: the integration reads the certificate of every intercom not
+  trusted yet and shows its fingerprint (nothing else is sent); compare it with the one your browser
+  shows on the web page of the intercom (padlock, certificate, SHA-256 fingerprint); then **click
+  again within 2 minutes**: every intercom that still shows the same fingerprint is trusted, kept in
+  `/data` (if `/data` cannot be written, nothing is trusted);
+- or paste the fingerprints into the **Certificate fingerprints** field, separated by commas.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+If an intercom later shows **another certificate**, nothing is sent to it (no password, no command),
+the status shows the fingerprint seen, and the integration never learns it by itself: trust it again
+(two clicks) if it was replaced on purpose (new certificate, factory reset).
 
-## Troubleshooting
+## Activating a switch (opening a door)
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+Anyone who can control the devices in Gladys (dashboard, scenes, app) can open the doors once **Allow
+activating the switches from Gladys** is checked: check it only if your Gladys is well protected.
+
+- An activation is a **push button**, never a switch: a "turn everything off" never opens a door.
+- Right before each activation, the integration reads the identity of the intercom again (its serial
+  number must be the one of the button's device) and the settings of the switch, then checks the option
+  one last time before sending.
+- Only **monostable** switches are activated, and only when their activation time (set in the
+  intercom) is **60 s at most**: the switch turns off by itself after it, whatever happens to Gladys.
+  There is therefore no "close" command.
+- An activation is **never sent again** by the integration, nor after a restart.
+- The answer says: "confirmed" (the switch is read active, or the intercom reports the activation by
+  the API), "accepted, not read back yet", "sent, no answer (maybe activated)", "refused by the
+  intercom" (switch locked or disabled), or "nothing sent" with the reason.
+
+An activation is refused, **with nothing sent**, when: the option is unchecked; the certificate is not
+trusted or changed; the credentials were refused; the intercom was not read yet, is unreachable or does
+not answer in time; another intercom answers at the address; the switch is missing, disabled, bistable,
+of unreadable mode or duration, or on for more than 60 s; the account lacks the switch control
+privilege; more than 4 commands are already waiting; the integration is stopping or being
+reconfigured; the 3.3 s deadline passed before sending.
+
+The "2N switch activated" trigger ignores the activation Gladys made itself (a scene opening the door on
+this trigger does not loop).
+
+## Good to know
+
+- **Credentials refused** (401 on the identity): the intercom is not asked again, even after a
+  restart, until you change the credentials, save the configuration or click **Test the connection**.
+  A refusal on another function (missing privilege) is no credentials refusal: that function is asked
+  again after 1 min, then doubling up to 1 h.
+- The event channel is opened again after a cut; events during the cut are lost, and a channel read
+  arriving after a long silence (over 90 s) is ignored, so old events are never published. The states
+  are corrected by the next reading.
+- `/data` only keeps the trusted certificates (their fingerprint, a public value) and an 8-bit mark of
+  refused credentials, never a password.
+
+## More
+
+Code and issues: <https://github.com/LM1LC3N7/gladys-2n-intercom>. API manual:
+<https://wiki.2n.com/hip/hapi/latest/en>.

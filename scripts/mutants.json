@@ -1,0 +1,176 @@
+[
+  {
+    "name": "open(): option check removed",
+    "file": "src/session.js",
+    "from": "    if (!this.app.config.allowOpen) refuse(T.openDisabled);",
+    "to": ""
+  },
+  {
+    "name": "runOpen(): option check removed",
+    "file": "src/session.js",
+    "from": "    if (!this.app.config.allowOpen) notSent(T.openDisabled);",
+    "to": ""
+  },
+  {
+    "name": "beforeSend: option check removed",
+    "file": "src/session.js",
+    "from": "          if (!this.app.config.allowOpen) {",
+    "to": "          if (false) {"
+  },
+  {
+    "name": "beforeSend: deadline check removed",
+    "file": "src/session.js",
+    "from": "          if (this.mono >= deadline) {",
+    "to": "          if (false) {"
+  },
+  {
+    "name": "identity check removed",
+    "file": "src/session.js",
+    "from": "      if (info.serial !== this.identity.serial) notSent(T.otherDevice);",
+    "to": ""
+  },
+  {
+    "name": "identity shared with an older command",
+    "file": "src/session.js",
+    "from": "this.cmdVerifiedAt < received",
+    "to": "this.cmdVerifiedAt < received - 3600000"
+  },
+  {
+    "name": "capabilities shared with an older command",
+    "file": "src/session.js",
+    "from": "this.cmdCapsAt < received",
+    "to": "this.cmdCapsAt < received - 3600000"
+  },
+  {
+    "name": "bistable accepted",
+    "file": "src/session.js",
+    "from": "    if (caps.mode === 'bistable') notSent(T.bistable);\n    if (caps.mode !== 'monostable') notSent(T.modeUnknown);",
+    "to": ""
+  },
+  {
+    "name": "unknown mode accepted",
+    "file": "src/session.js",
+    "from": "    if (caps.mode !== 'monostable') notSent(T.modeUnknown);",
+    "to": ""
+  },
+  {
+    "name": "unknown duration accepted",
+    "file": "src/session.js",
+    "from": "    if (caps.duration === undefined || caps.duration < 1) notSent(T.modeUnknown);",
+    "to": ""
+  },
+  {
+    "name": "duration over 60 s accepted",
+    "file": "src/session.js",
+    "from": "    if (caps.duration > LIMITS.maxSwitchOnSeconds) {",
+    "to": "    if (false) {"
+  },
+  {
+    "name": "disabled switch accepted",
+    "file": "src/session.js",
+    "from": "    if (!caps.enabled) notSent(T.switchDisabled);",
+    "to": ""
+  },
+  {
+    "name": "queue bound removed",
+    "file": "src/session.js",
+    "from": "    if (this.waiting >= LIMITS.commandQueue) refuse(T.queueFull);",
+    "to": ""
+  },
+  {
+    "name": "reading applied after a command",
+    "file": "src/session.js",
+    "from": "      if (this.stopped || epoch !== this.epoch) throw new Skip();",
+    "to": "      if (this.stopped) throw new Skip();"
+  },
+  {
+    "name": "state read before a newer event applied",
+    "file": "src/session.js",
+    "from": "      if (active === undefined || !this.fresher(switchKey(n, 'state'), seq)) continue;",
+    "to": "      if (active === undefined) continue;"
+  },
+  {
+    "name": "own activation published as an event",
+    "file": "src/session.js",
+    "from": "      if (e.originator === 'api' && this.consumeOwnOpen(e.n)) {",
+    "to": "      if (false) {"
+  },
+  {
+    "name": "doorbell at every call event",
+    "file": "src/session.js",
+    "from": "        if (!known) this.app.sceneEvent(TRIGGERS.DOORBELL, { device });",
+    "to": "        this.app.sceneEvent(TRIGGERS.DOORBELL, { device });"
+  },
+  {
+    "name": "old events after a long silence published",
+    "file": "src/session.js",
+    "from": "        if (silence > this.app.timings.eventGap || silence < 0) {",
+    "to": "        if (false) {"
+  },
+  {
+    "name": "empty channel reads in a tight loop",
+    "file": "src/session.js",
+    "from": "        if (!events.length && mono - sentAt < 1000) pause = 1000;",
+    "to": ""
+  },
+  {
+    "name": "secondary refusal without backoff",
+    "file": "src/session.js",
+    "from": "      const state = DENIED_KINDS.has(err?.kind) ? 'denied' : 'failed';",
+    "to": "      const state = 'failed';"
+  },
+  {
+    "name": "pin not compared",
+    "file": "src/http.js",
+    "from": "      if (!fp || !pins.includes(fp)) {",
+    "to": "      if (!fp) {"
+  },
+  {
+    "name": "no pin: request sent anyway",
+    "file": "src/http.js",
+    "from": "    if (!pins?.length) {\n      reject(",
+    "to": "    if (false) {\n      reject("
+  },
+  {
+    "name": "error 10 with 401 taken for a refusal",
+    "file": "src/http.js",
+    "from": "      if (errorCode(answer.text) === 10) return answer;",
+    "to": ""
+  },
+  {
+    "name": "answer size not bounded",
+    "file": "src/http.js",
+    "from": "          if (size > maxBody) {",
+    "to": "          if (false) {"
+  },
+  {
+    "name": "trust: another fingerprint pinned",
+    "file": "src/app.js",
+    "from": "pending.fps.get(x.session.host.key) === x.fp",
+    "to": "true"
+  },
+  {
+    "name": "trust: no time window",
+    "file": "src/app.js",
+    "from": "mono - pending.at <= this.timings.trustWindow && mono >= pending.at",
+    "to": "true"
+  },
+  {
+    "name": "trust: kept although /data not written",
+    "file": "src/app.js",
+    "from": "    if (!ok) {\n      this.data.pins = before;",
+    "to": "    if (false) {\n      this.data.pins = before;"
+  },
+  {
+    "name": "refused credentials forgotten at start",
+    "file": "src/app.js",
+    "from": "      if (this.isRefused(session)) session.state = 'refused';",
+    "to": ""
+  },
+  {
+    "name": "/data unreadable overwritten",
+    "file": "src/app.js",
+    "from": "    if (this.storeState === 'unreadable') return;\n    Promise",
+    "to": "    Promise"
+  }
+]

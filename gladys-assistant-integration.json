@@ -1,177 +1,389 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "2N IP Intercom",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "2N IP intercoms, locally over HTTPS: doorbell, door switches, inputs, access events.",
+    "fr": "Interphones 2N IP, en local par HTTPS : sonnette, relais de porte, entrées, accès."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-2n-intercom:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-2n-intercom/main/cover.png",
+  "categories": ["security"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your 2N intercoms",
+        "fr": "Vos interphones 2N"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "For 2N IP intercoms and access units (Verso, Force, Safety, Solo, Style, Base, Access Unit...) on your network, through their official HTTP API over HTTPS, without any cloud: a doorbell, the state of the switches (door locks) and of the inputs, an activation button per switch (off by default), and scene triggers (doorbell, switch activated, access granted or denied). Create an HTTP API account in the web page of each intercom first (see the guide). Never tested with a real device. Unofficial, not affiliated with 2N.",
+        "fr": "Pour les interphones et unités d'accès 2N IP (Verso, Force, Safety, Solo, Style, Base, Access Unit…) de votre réseau, par leur API HTTP officielle en HTTPS, sans cloud : une sonnette, l'état des relais (gâches) et des entrées, un bouton d'activation par relais (désactivé par défaut), et des déclencheurs de scène (sonnette, relais activé, accès accordé ou refusé). Créez d'abord un compte API HTTP dans la page web de chaque interphone (voir le guide). Jamais testé avec un vrai appareil. Non officiel, sans lien avec 2N."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-2n-intercom/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-2n-intercom/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "hosts",
+      "type": "string",
+      "label": {
+        "en": "Addresses of the intercoms",
+        "fr": "Adresses des interphones"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "description": {
+        "en": "The IP address of each intercom, separated by commas (8 at most), with \":port\" if its HTTPS port is not 443. Give each intercom a fixed address in your router.",
+        "fr": "L'adresse IP de chaque interphone, séparées par des virgules (8 au plus), avec « :port » si son port HTTPS n'est pas 443. Donnez à chaque interphone une adresse fixe dans votre box."
+      },
+      "placeholder": {
+        "en": "192.168.1.50, 192.168.1.51",
+        "fr": "192.168.1.50, 192.168.1.51"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
+      "key": "auth",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "label": {
+        "en": "Authentication of the HTTP API",
+        "fr": "Authentification de l'API HTTP"
+      },
+      "description": {
+        "en": "As set for the services in the Services > HTTP API page of the intercoms. Digest (the default of the intercoms) never sends the password; Basic sends it inside the HTTPS connection; None sends nothing.",
+        "fr": "Comme réglée pour les services dans la page Services > API HTTP des interphones. Digest (le réglage d'usine) n'envoie jamais le mot de passe ; Basic l'envoie dans la connexion HTTPS ; Aucune n'envoie rien."
+      },
       "required": false,
-      "default": "celsius",
+      "default": "digest",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "digest",
+          "label": {
+            "en": "Digest (recommended)",
+            "fr": "Digest (conseillé)"
+          }
+        },
+        {
+          "value": "basic",
+          "label": {
+            "en": "Basic",
+            "fr": "Basic"
+          }
+        },
+        {
+          "value": "none",
+          "label": {
+            "en": "None",
+            "fr": "Aucune"
+          }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "username",
+      "type": "string",
+      "label": {
+        "en": "User of the HTTP API account",
+        "fr": "Utilisateur du compte API HTTP"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The same on every intercom listed above.",
+        "fr": "Le même sur tous les interphones listés ci-dessus."
+      },
+      "placeholder": {
+        "en": "gladys",
+        "fr": "gladys"
+      },
+      "required": false
+    },
+    {
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "Password of the HTTP API account",
+        "fr": "Mot de passe du compte API HTTP"
+      },
+      "description": {
+        "en": "Kept by Gladys in its database, never shown again, sent only to the intercoms listed above, and only once their certificate is trusted (with Digest, only a proof of it travels). An intercom that refuses it is not asked again until you change it or click \"Test the connection\".",
+        "fr": "Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement aux interphones listés ci-dessus, et seulement une fois leur certificat approuvé (avec Digest, seule une preuve en circule). Un interphone qui le refuse n'est plus sollicité tant que vous ne le changez pas ou ne cliquez pas sur « Tester la connexion »."
+      },
+      "required": false
+    },
+    {
+      "key": "fingerprints",
+      "type": "string",
+      "label": {
+        "en": "Certificate fingerprints (optional)",
+        "fr": "Empreintes des certificats (facultatif)"
+      },
+      "description": {
+        "en": "The intercoms show a certificate of their own, that no authority vouches for: nothing is sent to an intercom before its certificate is trusted. Either click \"Trust the certificates\" twice (the first click shows what each intercom presents), or paste here the SHA-256 fingerprint of each certificate, separated by commas.",
+        "fr": "Les interphones présentent un certificat à eux, qu'aucune autorité ne garantit : rien n'est envoyé à un interphone avant que son certificat soit approuvé. Cliquez deux fois sur « Approuver les certificats » (le premier clic montre ce que présente chaque interphone), ou collez ici l'empreinte SHA-256 de chaque certificat, séparées par des virgules."
+      },
+      "placeholder": {
+        "en": "AB:CD:EF:...",
+        "fr": "AB:CD:EF:..."
+      },
+      "required": false
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": {
+        "en": "Reading interval (seconds)",
+        "fr": "Intervalle de lecture (secondes)"
+      },
+      "description": {
+        "en": "How often the switches, the inputs and the calls are read again (5 to 300). Events (doorbell, switches, inputs, access) arrive at once when the account may read them.",
+        "fr": "Tous les combien les relais, les entrées et les appels sont relus (5 à 300). Les événements (sonnette, relais, entrées, accès) arrivent tout de suite quand le compte a le droit de les lire."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 10,
+      "min": 5,
+      "max": 300
+    },
+    {
+      "key": "safety",
+      "type": "section",
+      "label": {
+        "en": "Activating the switches (doors)",
+        "fr": "Activation des relais (portes)"
+      },
+      "description": {
+        "en": "Anyone who can control the devices in Gladys (dashboard, scenes, the Gladys app) can open the doors once this is allowed: allow it only if your Gladys is well protected. An activation is a push button, never a switch: a \"turn everything off\" never opens a door. Only monostable switches are activated (they turn off by themselves after their duration, 60 s at most); it is never sent again by the integration, nor after a restart. Every activation is written in the integration logs; the password never is.",
+        "fr": "Toute personne pouvant piloter les appareils dans Gladys (tableau de bord, scènes, application Gladys) peut ouvrir les portes une fois cette option cochée : ne l'autorisez que si votre Gladys est bien protégé. Une activation est un bouton, jamais un interrupteur : un « tout éteindre » n'ouvre jamais une porte. Seuls les relais monostables sont activés (ils se coupent d'eux-mêmes après leur durée, 60 s au plus) ; l'intégration ne la renvoie jamais, ni après un redémarrage. Chaque activation est écrite dans les journaux de l'intégration, jamais le mot de passe."
+      }
+    },
+    {
+      "key": "allow_open",
+      "type": "boolean",
+      "label": {
+        "en": "Allow activating the switches from Gladys",
+        "fr": "Autoriser l'activation des relais depuis Gladys"
+      },
+      "description": {
+        "en": "Once checked, every Gladys user, every scene and the Gladys mobile app can activate the door switches.",
+        "fr": "Une fois cochée, tout utilisateur de Gladys, toute scène et l'application mobile Gladys peuvent activer les relais de porte."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the names",
+        "fr": "Langue des noms"
+      },
+      "description": {
+        "en": "Used for the names of the devices and features added from now on.",
+        "fr": "Sert aux noms des appareils et fonctionnalités ajoutés désormais."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
       "timeout_seconds": 30
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "trust_certificates",
+      "label": {
+        "en": "Trust the certificates",
+        "fr": "Approuver les certificats"
+      },
+      "timeout_seconds": 30
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "doorbell",
+      "label": {
+        "en": "2N doorbell",
+        "fr": "Sonnette 2N"
+      },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "A visitor rings: the intercom starts a call (an outgoing call that connects or rings).",
+        "fr": "Un visiteur sonne : l'interphone lance un appel (appel sortant en cours de connexion ou qui sonne)."
       },
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
+          "label": {
+            "en": "Intercom (empty: any)",
+            "fr": "Interphone (vide : tous)"
+          }
+        }
+      ],
+      "variables": []
+    },
+    {
+      "key": "switch_activated",
+      "label": {
+        "en": "2N switch activated",
+        "fr": "Relais 2N activé"
+      },
+      "description": {
+        "en": "A switch of the intercom turns on (code, card, button, schedule...). An activation from Gladys is not one.",
+        "fr": "Un relais de l'interphone s'active (code, badge, bouton, horaire…). Une activation depuis Gladys n'en est pas une."
+      },
+      "fields": [
         {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Intercom (empty: any)",
+            "fr": "Interphone (vide : tous)"
+          }
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "switch",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": {
+            "en": "Switch (1 to 4)",
+            "fr": "Relais (1 à 4)"
+          }
+        },
+        {
+          "key": "originator",
+          "type": "string",
+          "label": {
+            "en": "Origin (as the intercom says it)",
+            "fr": "Origine (telle que dite par l'interphone)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
+    },
     {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+      "key": "access_granted",
+      "label": {
+        "en": "2N access granted",
+        "fr": "Accès 2N accordé"
       },
-      "timeout_seconds": 15,
+      "description": {
+        "en": "A user of the intercom's directory is authenticated (code, card, fingerprint...).",
+        "fr": "Un utilisateur de l'annuaire de l'interphone est reconnu (code, badge, empreinte…)."
+      },
       "fields": [
         {
           "key": "device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
+          "label": {
+            "en": "Intercom (empty: any)",
+            "fr": "Interphone (vide : tous)"
+          }
         }
       ],
-      "outputs": [
+      "variables": [
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "user",
+          "type": "string",
+          "label": {
+            "en": "User",
+            "fr": "Utilisateur"
+          }
+        },
+        {
+          "key": "direction",
+          "type": "string",
+          "label": {
+            "en": "Direction (entry or exit)",
+            "fr": "Sens (entry ou exit)"
+          }
         }
       ]
-    }
-  ],
-  "widgets": [
+    },
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
+      "key": "access_denied",
+      "label": {
+        "en": "2N access denied",
+        "fr": "Accès 2N refusé"
       },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "description": {
+        "en": "The intercom refuses an access (unknown card, wrong time, blocked user...).",
+        "fr": "L'interphone refuse un accès (badge inconnu, hors horaire, utilisateur bloqué…)."
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Intercom (empty: any)",
+            "fr": "Interphone (vide : tous)"
+          }
+        }
+      ],
+      "variables": [
+        {
+          "key": "user",
+          "type": "string",
+          "label": {
+            "en": "User",
+            "fr": "Utilisateur"
+          }
+        },
+        {
+          "key": "direction",
+          "type": "string",
+          "label": {
+            "en": "Direction (entry or exit)",
+            "fr": "Sens (entry ou exit)"
+          }
+        },
+        {
+          "key": "reason",
+          "type": "string",
+          "label": {
+            "en": "Reason (as the intercom says it)",
+            "fr": "Motif (tel que dit par l'interphone)"
+          }
+        }
+      ]
     }
   ]
 }
