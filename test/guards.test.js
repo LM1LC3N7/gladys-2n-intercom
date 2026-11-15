@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:https';
 import { request as realRequest } from '../src/http.js';
-import { MemoryStore, emptyData } from '../src/store.js';
+import { FileStore, MemoryStore, emptyData } from '../src/store.js';
 import { CERTS, FP, PASSWORD, USER, startFake2N } from './helpers/fake2n.js';
 import { D, F, press, setup, sleep, until, within } from './helpers/app.js';
 
@@ -457,4 +457,99 @@ test('a declared length too large is refused before the body comes (R19)', async
   );
   assert.ok(Date.now() - started < 1500);
   assert.equal(triggers({ requests: [] }).length, 0);
+});
+
+// --- review r2 ----------------------------------------------------------------------
+
+test('a new nonce at every 401: a wrong password is refused after one proof, a right one passes (R1 r2)', async (t) => {
+  const fake = await startFake2N({ nonceEach401: true });
+  t.after(() => fake.close());
+  const host = { address: '127.0.0.1', port: fake.port, key: fake.host };
+  const auth = { mode: 'digest', username: USER, password: PASSWORD };
+  const wrong = { ...auth, password: 'wrong' };
+  await assert.rejects(
+    realRequest({
+      host,
+      pins: [FP],
+      auth: wrong,
+      session: {},
+      path: '/api/system/info',
+      timeout: 3000,
+    }),
+    { kind: 'refused', sent: false },
+  );
+  assert.equal(fake.requests.filter((r) => r.headers.authorization).length, 1, 'one proof sent');
+  // The right password with an expired cached nonce: answered once, then 200.
+  const session = {};
+  await realRequest({ host, pins: [FP], auth, session, path: '/api/system/info', timeout: 3000 });
+  session.challenge = { ...session.challenge, nonce: 'expired' };
+  const ok = await realRequest({
+    host,
+    pins: [FP],
+    auth,
+    session,
+    path: '/api/system/info',
+    timeout: 3000,
+  });
+  assert.equal(ok.status, 200);
+});
+
+test('a new nonce at every 401, wrong password: the session is refused and kept so (R1 r2)', async (t) => {
+  const s = await setup(t, { fake: { nonceEach401: true, password: 'other' } });
+  await s.step(0);
+  await until(() => s.session().state === 'refused');
+  assert.ok(s.store.data.refused[s.fake.host]);
+  const asked = s.fake.requests.length;
+  await s.advance(20 * POLL);
+  await sleep(20);
+  assert.equal(s.fake.requests.length, asked);
+});
+
+test('/data stuck: one read of the file at a time, never doubled (M1 r2)', async () => {
+  let opens = 0;
+  const store = new FileStore({
+    dir: '/nonexistent-2n-test',
+    timeout: 30,
+    openFile: () => {
+      opens += 1;
+      return new Promise(() => {}); // never answers
+    },
+  });
+  for (let i = 0; i < 4; i += 1) {
+    assert.equal((await within(store.load(), 2000, 'load')).state, 'unreadable');
+  }
+  assert.equal(opens, 1);
+});
+
+test('/data readable again: a refusal seen meanwhile is kept (N10)', async (t) => {
+  const store = new MemoryStore(emptyData(), { state: 'unreadable' });
+  const s = await setup(t, { store, fake: { password: 'other' } });
+  await s.step(0);
+  await until(() => s.session().state === 'refused');
+  const asked = s.fake.requests.length;
+  store.state = 'ok';
+  await s.advance(10_000);
+  await sleep(50);
+  await s.step(0);
+  await sleep(50);
+  assert.equal(s.app.storeState, 'ok');
+  assert.ok(s.app.data.refused[s.fake.host], 'the refusal is kept');
+  assert.equal(s.fake.requests.length, asked, 'the refused password is not sent again');
+  s.gladys.emit('connected');
+  await sleep(50);
+  await s.step(0);
+  await sleep(50);
+  assert.equal(s.session().state, 'refused');
+  assert.equal(s.fake.requests.length, asked);
+  await until(() => store.saves >= 1);
+  assert.ok(store.data.refused[s.fake.host], 'written to /data');
+});
+
+test('a trigger answered 401 without proof (method): "nothing sent", no mark (N15)', async (t) => {
+  const s = await setup(t, { config: { auth: 'none' }, fake: { auth: 'none' } });
+  await s.ready();
+  s.fake.status['/api/switch/ctrl'] = 401;
+  const ack = await press(s.gladys, 1);
+  assert.match(ack.error, /rien envoyé \(authentification non acceptée\)/);
+  assert.equal(s.session().ownOpens.length, 0);
 });

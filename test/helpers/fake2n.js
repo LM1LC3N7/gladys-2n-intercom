@@ -10,7 +10,7 @@
 // (paths that never answer), `drop` (paths received then cut), `status`
 // (path -> HTTP status), `code` (path -> 2N error code, with `codeStatus`),
 // `body` (path -> raw text), `info`, `caps`, `switches`, `ports`, `inputs`,
-// `sessions`, `pullHoldMs`, `cert` (useCert()).
+// `sessions`, `pullHoldMs`, `nonceEach401`, `cert` (useCert()).
 // Records: `requests` [{ path, query, authorized }], `connections`,
 // `handshakes` (TLS done), `channels`. `push(event, params)` queues an
 // event on every open channel.
@@ -247,6 +247,8 @@ export async function startFake2N(options = {}) {
       const wait = fake.latency[path] ?? fake.latency['*'] ?? 0;
       if (!authorized) {
         if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+        // Many Digest servers give a new nonce at every 401 (no stale flag).
+        if (fake.nonceEach401) fake.nonce = randomBytes(8).toString('hex');
         const challenge =
           fake.auth === 'basic'
             ? `Basic realm="${fake.realm}"`

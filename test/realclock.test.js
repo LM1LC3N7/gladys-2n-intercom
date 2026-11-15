@@ -192,9 +192,9 @@ test('real clock: the trigger step keeps to the deadline, the ack comes in time 
   const { gladys, app } = realApp(t, [fake], 1);
   await within(gladys.connect(), 5000);
   await until(() => [...app.sessions.values()].every((s) => s.state === 'ok' && s.timer), 5000);
-  fake.latency['/api/system/info'] = 900;
-  fake.latency['/api/switch/caps'] = 900;
-  fake.latency['/api/switch/status'] = 900;
+  // 2.4 s for identity and capabilities: the trigger has ~0.9 s left, never its full 1.5 s.
+  fake.latency['/api/system/info'] = 1200;
+  fake.latency['/api/switch/caps'] = 1200;
   fake.silent.add('/api/switch/ctrl');
   const started = performance.now();
   const ack = await within(
@@ -208,4 +208,68 @@ test('real clock: the trigger step keeps to the deadline, the ack comes in time 
   const took = performance.now() - started;
   assert.equal(ack.success, false);
   assert.ok(took < 3600, `${Math.round(took)} ms`);
+});
+
+test('real clock: 5 intercoms answering in 1.1 s, one scene: 5 triggers leave, acks in time (M2 r2)', async (t) => {
+  const fakes = [];
+  for (let i = 0; i < 5; i += 1) {
+    const fake = await startFake2N({ auth: 'none' });
+    fake.info.serialNumber = `54-0000-001${i}`;
+    fakes.push(fake);
+  }
+  t.after(() => Promise.all(fakes.map((f) => f.close())));
+  const { gladys, app } = realApp(t, fakes, 1);
+  await within(gladys.connect(), 5000);
+  await until(
+    () => [...app.sessions.values()].every((s) => s.state === 'ok' && s.timer && s.caps.size),
+    5000,
+  );
+  for (const fake of fakes) fake.latency['*'] = 1100;
+  const started = performance.now();
+  const acks = await within(
+    Promise.all(
+      fakes.map((_, i) =>
+        gladys.fake.setValue(
+          { external_id: `ext:2n-intercom:2n:54-0000-001${i}` },
+          { external_id: `ext:2n-intercom:2n:54-0000-001${i}:switch-1:open` },
+          1,
+        ),
+      ),
+    ),
+    8000,
+  );
+  const took = performance.now() - started;
+  assert.ok(took < 3600, `${Math.round(took)} ms`);
+  await sleep(1300);
+  assert.equal(
+    fakes.filter((f) => f.count('/api/switch/ctrl') === 1).length,
+    5,
+    JSON.stringify(acks),
+  );
+});
+
+test('real clock: with less than 2 s left, the state before an opening is not even asked (M2 r2)', async (t) => {
+  const fake = await startFake2N({ auth: 'none' });
+  t.after(() => fake.close());
+  const { gladys, app } = realApp(t, [fake], 1);
+  await within(gladys.connect(), 5000);
+  await until(() => [...app.sessions.values()].every((s) => s.state === 'ok' && s.timer), 5000);
+  fake.latency['/api/system/info'] = 700;
+  fake.latency['/api/switch/caps'] = 700;
+  fake.latency['/api/switch/status'] = 1100;
+  const mark = fake.requests.length;
+  await within(
+    gladys.fake.setValue(
+      { external_id: 'ext:2n-intercom:2n:54-0123-4567' },
+      { external_id: 'ext:2n-intercom:2n:54-0123-4567:switch-1:open' },
+      1,
+    ),
+    7000,
+  );
+  const after = fake.requests
+    .slice(mark)
+    .map((r) => `${r.path}${r.query.switch ? `?${r.query.switch}` : ''}`);
+  const trigger = after.indexOf('/api/switch/ctrl?1');
+  assert.ok(trigger > 0, JSON.stringify(after));
+  assert.ok(!after.slice(0, trigger).includes('/api/switch/status?1'), JSON.stringify(after));
 });

@@ -766,18 +766,23 @@ export class Session {
       notSent(T.tooLong(caps.duration, LIMITS.maxSwitchOnSeconds));
     }
     // The state of the switch, read right before (never the one in memory):
-    // a switch already active is never reported confirmed. Unreadable: the
-    // opening goes, but can only be reported "accepted".
+    // a switch already active is never reported confirmed. Optional: read
+    // only when the budget leaves the trigger its own time after it (a slow
+    // intercom loses the confirmation, never the opening); unread or
+    // unreadable, the opening can only be reported "accepted".
     if (remaining() < 100) notSent(T.tooLate);
     let before;
-    try {
-      const status = parseSwitchStatus(
-        parseAnswer(await this.commandRequest(PATHS.switchStatusOf(n), step())),
-      );
-      before = status.get(n)?.active;
-    } catch (err) {
-      if (err?.kind === 'aborted') notSent(T.stopped);
-      before = undefined;
+    if (remaining() > this.app.timings.beforeReadMin) {
+      try {
+        const budget = Math.min(step(), remaining() - this.app.timings.triggerReserve);
+        const status = parseSwitchStatus(
+          parseAnswer(await this.commandRequest(PATHS.switchStatusOf(n), budget)),
+        );
+        before = status.get(n)?.active;
+      } catch (err) {
+        if (err?.kind === 'aborted') notSent(T.stopped);
+        before = undefined;
+      }
     }
     if (remaining() < 100) notSent(T.tooLate);
 

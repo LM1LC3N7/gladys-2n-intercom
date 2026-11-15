@@ -356,8 +356,8 @@
   {
     "name": "I2 challenge of another request cleared",
     "file": "src/http.js",
-    "from": "session.challenge === used) session.challenge = undefined;",
-    "to": "true) session.challenge = undefined;"
+    "from": "} else if (auth.mode === 'digest' && session.challenge === used)",
+    "to": "} else if (auth.mode === 'digest')"
   },
   {
     "name": "M1 refused without credentials sent",
@@ -388,5 +388,35 @@
     "file": "src/app.js",
     "from": "    this.timers.clearTimeout(this.dataTimer);",
     "to": "    void 0;"
+  },
+  {
+    "name": "F1 second-round new nonce without stale taken for a nonce change",
+    "file": "src/http.js",
+    "from": "if (fresh && (round === 0 || stale)) {",
+    "to": "if (fresh) {"
+  },
+  {
+    "name": "N2 mark kept when nothing left",
+    "file": "src/session.js",
+    "from": "        unmark();\n        notSent(reasonOf(err));",
+    "to": "        notSent(reasonOf(err));"
+  },
+  {
+    "name": "N10 refusal seen during the run dropped at /data read",
+    "file": "src/app.js",
+    "from": "if (!session || data.refused[key]) continue;",
+    "to": "continue;"
+  },
+  {
+    "name": "M1r2 a stuck /data read doubled",
+    "file": "src/store.js",
+    "from": "    if (this.reading) return { data: emptyData(), state: 'unreadable' };",
+    "to": ""
+  },
+  {
+    "name": "M2r2 state read before an opening whatever the budget",
+    "file": "src/session.js",
+    "from": "    if (remaining() > this.app.timings.beforeReadMin) {",
+    "to": "    if (true) {"
   }
 ]

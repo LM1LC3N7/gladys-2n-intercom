@@ -87,8 +87,12 @@ export class FileStore {
     name = '2n-intercom.json',
     now = Date.now,
     openFile = open,
+    timeout = TIMINGS.storeTimeout,
   } = {}) {
     this.openFile = openFile;
+    this.timeout = timeout;
+    /** The read of the file under way (it may outlive the bound): one at a time. */
+    this.reading = undefined;
     this.dir = dir;
     this.path = join(dir, name);
     this.now = now;
@@ -96,8 +100,12 @@ export class FileStore {
     this.pending = undefined;
   }
 
-  /** -> { data, state: 'ok' | 'empty' | 'unreadable' } within the bound. */
+  /**
+   * -> { data, state: 'ok' | 'empty' | 'unreadable' } within the bound. A
+   * read still under way (a stuck disk) is never doubled: unreadable at once.
+   */
   async load() {
+    if (this.reading) return { data: emptyData(), state: 'unreadable' };
     let handle;
     const read = async () => {
       // O_NONBLOCK: opening a FIFO never waits for a writer.
@@ -131,14 +139,24 @@ export class FileStore {
       return buffer.subarray(0, bytesRead).toString('utf8');
     };
     try {
-      const text = await withTimeout(read(), TIMINGS.storeTimeout);
+      const reading = read();
+      this.reading = reading;
+      // Its end (even after the bound) frees the slot and closes the file.
+      const end = () => {
+        this.clearReading(reading);
+        handle?.close().catch(() => {});
+      };
+      reading.then(end, end);
+      const text = await withTimeout(reading, this.timeout);
       return { data: sanitize(safeJson(text), this.now()), state: 'ok' };
     } catch (err) {
       if (err?.code === 'ENOENT') return { data: emptyData(), state: 'empty' };
       return { data: emptyData(), state: 'unreadable' };
-    } finally {
-      handle?.close().catch(() => {});
     }
+  }
+
+  clearReading(reading) {
+    if (this.reading === reading) this.reading = undefined;
   }
 
   /**

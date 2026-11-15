@@ -22,7 +22,8 @@
   monostable switch turns off by itself), so no protective command to keep unblocked; `lock`, `hold`,
   `on`, `off` are not used.
 - Confirmation (review r1, I1, M2): the state of the switch is read right before the trigger (never the
-  one in memory); confirmed when it is read active after it and was read inactive before, or when the
+  one in memory), only when 2 s of the 3.3 s budget are left, leaving the trigger 1.1 s (review r2: a
+  slow intercom loses the confirmation, never the opening); confirmed when it is read active after it and was read inactive before, or when the
   SwitchStateChanged event with originator `api` on that switch comes (only if read inactive before). The
   mark of an activation is set in `beforeSend`, right before the first byte (the device may push the event
   on the held channel read before the trigger answer), taken back when nothing left or the device refused;
@@ -36,15 +37,17 @@
 - Credentials: refused only on a 401 of `/api/system/info` to a request that carried credentials (Basic,
   or a Digest proof), after one answered challenge (8-bit salted mark per address in `/data`, lifted by
   changed credentials, a saved configuration or the test button). A 401 is judged against the challenge
-  that request signed with (review r1, I2): a changed nonce is answered once, again changed is a device
-  error, never a refusal; the shared challenge is cleared only if still that one. No credentials sent
+  that request signed with (review r1, I2): a changed nonce is answered once; at the second round a new
+  nonce is ignored only with `stale=true`, otherwise it is a refusal (RFC 7616, servers that give a new
+  nonce at every 401; review r2, R1); the shared challenge is cleared only if still that one. No credentials sent
   (none configured, auth-int, unknown algorithm) = `method` (M1). Error 9 without a 401 = unexpected
   answer. A 401 carrying error 10, a 403, a 401 elsewhere (switch, I/O, call, log, trigger) is never a
   refusal: "not allowed" for that endpoint, asked again after 1 min doubling to 1 h. Digest configured
   and the device asks for Basic: nothing sent.
 - No code, card UID nor user UUID is read into an event; the directory user name only.
 - `/data`: read bounded (2 s, 64 KB, regular file, no symbolic link); unreadable is never overwritten, and
-  read again every 10 s on a timer of its own, one read at a time, until readable (review r1, I3): its
+  read again every 10 s on a timer of its own, one read of the file at a time (a stuck read is never
+  doubled, review r2), until readable (review r1, I3): its
   pins and refusals then start the sessions again; a refusal seen meanwhile is kept.
 - Categories: `security`.
 

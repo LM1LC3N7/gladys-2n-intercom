@@ -371,14 +371,21 @@ export async function request({
         auth.mode === 'digest' &&
         digest?.nonce &&
         (!used || String(digest.stale).toLowerCase() === 'true' || digest.nonce !== used.nonce);
-      if (fresh) {
+      const stale = String(digest?.stale).toLowerCase() === 'true';
+      if (fresh && (round === 0 || stale)) {
         session.challenge = digest;
         session.nc = 0;
         if (round === 0) continue;
-        // The nonce changed again: no proof of the password was judged.
+        // Our proof was only out of date (stale=true): nothing judged.
         throw new IntercomError('The device changed its nonce', 'device', { status: 401 });
       }
-      if (auth.mode === 'digest' && session.challenge === used) session.challenge = undefined;
+      // A second round answered with a new nonce WITHOUT stale=true rejects
+      // the proof (RFC 7616: many servers give a new nonce at every 401).
+      if (fresh) {
+        session.challenge = digest;
+        session.nc = 0;
+      } else if (auth.mode === 'digest' && session.challenge === used)
+        session.challenge = undefined;
       if (auth.mode === 'digest' && !digest && challenges.basic) {
         throw new IntercomError('The device asks for Basic', 'basic-only', { status: 401 });
       }
@@ -391,11 +398,9 @@ export async function request({
     }
     throw new IntercomError('No answer', 'answer'); // never reached: each round returns or throws
   } catch (err) {
-    if (err instanceof IntercomError) {
-      // A 401 round reached the device but did nothing: only the last round counts.
-      if (err.status === 401) err.sent = false;
-      throw err;
-    }
+    // A 401 reached the device but did nothing: every error built above for
+    // a 401 is "not sent" (the IntercomError default).
+    if (err instanceof IntercomError) throw err;
     throw new IntercomError('Request failed', 'offline', { sent: sentOnce });
   } finally {
     clearTimeout(timer);

@@ -38,6 +38,10 @@ export const TIMINGS = Object.freeze({
   commandStepTimeout: 1500,
   /** A command acks under this (Gladys stops waiting at 5 s). */
   commandBudget: 3300,
+  /** The state before an opening is read only when this much of the budget is left... */
+  beforeReadMin: 2000,
+  /** ... and the read leaves the trigger at least this. */
+  triggerReserve: 1100,
   /** After an opening accepted without confirmation, the switch is read again after these. */
   confirmReads: [1000, 3000],
   /** The capabilities of the switches and the inputs are read again after this. */
