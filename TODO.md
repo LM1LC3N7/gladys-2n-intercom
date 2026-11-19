@@ -39,9 +39,16 @@
   changed credentials, a saved configuration or the test button). A 401 is judged against the challenge
   that request signed with (review r1, I2): a changed nonce is answered once; at the second round a new
   nonce is ignored only with `stale=true`, otherwise it is a refusal (RFC 7616, servers that give a new
-  nonce at every 401; review r2, R1). One Digest renewal at a time per intercom; a request whose 401
-  raced another one's is answered once more (review r3, I1). A refusal of the identity is kept only when
-  a second identity read, made alone (channel cut, no reading, commands done), is refused too; the shared challenge is cleared only if still that one. No credentials sent
+  nonce at every 401; review r2, R1). One Digest exchange at a time per intercom: any round after the
+  first holds a lock, every other round waits; the lock is given back at that round's answer, or 500 ms
+  after it was written, or 3 s if not written by then (a held channel read never blocks commands and
+  readings; review r4, I1); a waiter out of budget is "busy" (Digest authentication in progress), never
+  "unreachable". A request whose 401 raced another one's is answered once more (review r3, I1). A refusal
+  of the identity is kept only when a second identity read, made alone (channel cut, no reading, no
+  follow-up read, commands done, openings refused, the test button waits for its outcome), is refused
+  too; that read starts with no challenge, so a wrong password costs 2 proofs (3 when the password
+  changes on a device that renews its nonce at every 401; review r4, M1); the shared challenge is
+  cleared only if still that one. No credentials sent
   (none configured, auth-int, unknown algorithm) = `method` (M1). Error 9 without a 401 = unexpected
   answer. A 401 carrying error 10, a 403, a 401 elsewhere (switch, I/O, call, log, trigger) is never a
   refusal: "not allowed" for that endpoint, asked again after 1 min doubling to 1 h. Digest configured

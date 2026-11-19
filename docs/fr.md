@@ -99,6 +99,15 @@ ouvrirait la porte sur ce déclencheur ne boucle pas).
   configuration ou ne cliquez pas sur **Tester la connexion**. Un refus sur une autre fonction (droit
   absent) n'est pas un refus d'identifiants : cette fonction est redemandée après 1 min, puis en
   doublant jusqu'à 1 h.
+- Un mauvais mot de passe est essayé 2 fois (une preuve Digest, ou l'en-tête Basic, par lecture de
+  l'identité) avant d'être retenu, 3 fois au plus si le mot de passe change sur l'interphone pendant que l'intégration tourne ;
+  ensuite, plus aucun essai automatique. Chaque clic sur **Tester la connexion** coûte de nouveau 2 essais
+  (un clic toutes les 5 s au plus). La documentation 2N cite un événement `LoginBlocked` après 3 essais
+  ratés sur l'interface web ; elle ne dit pas si les échecs de l'API comptent aussi. Si l'interphone
+  bloque l'adresse de Gladys, attendez la fin du blocage avant de tester de nouveaux identifiants.
+- Avec Digest, une seule demande à la fois répond à un nouveau défi de l'interphone ; les autres
+  attendent sa réponse, au plus 0,5 s après son envoi (3,5 s si la connexion à l'interphone tarde), même
+  quand c'est une lecture du canal d'événements que l'interphone garde ouverte jusqu'à 20 s.
 - Une ouverture n'est « confirmée » que si l'état du relais a pu être lu juste avant elle. Au-delà d'environ
   650 ms par réponse de l'interphone, cette lecture est sautée pour laisser le temps à l'ouverture : elle
   part quand même, mais n'est qu'« acceptée ».

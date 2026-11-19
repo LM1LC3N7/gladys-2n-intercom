@@ -130,6 +130,10 @@ export const T = {
   badValue: t('valeur inattendue', 'unexpected value'),
   credentialsRefused: t('identifiants refusés', 'credentials refused'),
   checkingReason: t('identifiants en cours de vérification', 'credentials being checked'),
+  authBusy: t(
+    'authentification Digest en cours avec l’interphone',
+    'Digest authentication in progress with the intercom',
+  ),
   refusedReason: t('refus de l’interphone (401)', 'refused by the intercom (401)'),
   untrustedReason: t('certificat pas encore approuvé', 'certificate not trusted yet'),
   pinReason: t(

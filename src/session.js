@@ -196,7 +196,8 @@ export class Session {
 
   /** A reading: steps back for any command, never applied after one. */
   async read(path) {
-    if (this.stopped || this.waiting > 0) throw new Skip();
+    // No reading while credentials are checked: that read is made alone.
+    if (this.stopped || this.waiting > 0 || this.checking) throw new Skip();
     const epoch = this.epoch;
     const controller = new AbortController();
     this.currentRead = controller;
@@ -250,6 +251,9 @@ export class Session {
   /** A failed reading of the identity: the session stops reading (or waits). */
   readFailed(err) {
     const kind = err?.kind ?? 'answer';
+    // Out of budget behind another request's Digest exchange: nothing was
+    // judged; read again at the next interval, state and channel kept.
+    if (kind === 'busy') return this.app.config.pollMs;
     this.stopListening();
     if (kind === 'refused') {
       this.confirmRefusal();
@@ -302,6 +306,10 @@ export class Session {
       try {
         await this.commandChain;
         if (this.stopped) return 'failed';
+        // Alone, it starts with no challenge: the device's current nonce is
+        // fetched without a proof, and nobody can replace it before the one
+        // proof of this read (a wrong password costs 2 proofs in all, not 3).
+        this.digest.challenge = undefined;
         try {
           const answer = await this.app.request(
             this.requestOptions({
@@ -338,6 +346,8 @@ export class Session {
     this.app.timers.clearTimeout(this.timer);
     this.timer = undefined;
     this.stopListening();
+    // A test click starts again with no challenge (one proof, then the check).
+    this.digest.challenge = undefined;
     this.switches.clear();
     this.inputStates.clear();
     this.ringing = undefined;
@@ -780,6 +790,7 @@ export class Session {
       if (err?.kind === 'privilege') return T.privilegeReason;
       if (err?.kind === 'disabled') return T.disabledReason;
       if (err?.kind === 'basic-only' || err?.kind === 'method') return T.methodReason;
+      if (err?.kind === 'busy') return T.authBusy;
       if (err?.kind === 'answer' && err.sent) return T.unexpectedReason;
       return T.unreachable;
     };
@@ -954,6 +965,12 @@ export class Session {
       await this.showFingerprint();
       return this.seen ? T.untrusted(this.host.key, this.seen) : T.down(this.host.key);
     }
+    const checked = (outcome) => {
+      if (outcome === 'refused') return T.refused(this.host.key);
+      return outcome === 'accepted' ? T.starting(this.host.key) : T.down(this.host.key);
+    };
+    // Credentials being checked: that read stays alone, its outcome is the answer.
+    if (this.checking) return checked(await this.checking);
     try {
       const answer = await this.app.request(
         this.requestOptions({
@@ -971,11 +988,7 @@ export class Session {
       }
       return T.testOk(this.host.key, info.model, info.serial.toUpperCase());
     } catch (err) {
-      if (err?.kind === 'refused') {
-        const outcome = await this.confirmRefusal();
-        if (outcome === 'refused') return T.refused(this.host.key);
-        return outcome === 'accepted' ? T.starting(this.host.key) : T.down(this.host.key);
-      }
+      if (err?.kind === 'refused') return checked(await this.confirmRefusal());
       if (err?.kind === 'pin') {
         this.seen = err.fingerprint;
         this.setState('pin');

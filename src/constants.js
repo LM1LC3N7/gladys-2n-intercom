@@ -34,6 +34,8 @@ export const TIMINGS = Object.freeze({
   readTimeout: 5000,
   /** A TLS handshake never takes longer (a reading, or a command step). */
   connectTimeout: 3000,
+  /** Digest: another request waits this long at most after a renewal round was written. */
+  renewHold: 500,
   /** Budget of one request of a command (identity, switch, trigger). */
   commandStepTimeout: 1500,
   /** A command acks under this (Gladys stops waiting at 5 s). */

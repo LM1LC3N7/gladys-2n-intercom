@@ -434,8 +434,8 @@
   {
     "name": "I1r3 renewals not serialized",
     "file": "src/http.js",
-    "from": "        if (!session.renewing) {",
-    "to": "        if (false) {"
+    "from": "      if (round > 0 && auth.mode === 'digest' && !holding) {",
+    "to": "      if (false) {"
   },
   {
     "name": "I1r3 refusal kept without a second identity read",
@@ -454,5 +454,113 @@
     "file": "src/session.js",
     "from": "remaining() - this.app.timings.triggerReserve",
     "to": "remaining()"
+  },
+  {
+    "name": "N15b a 401 without proof (method) counted as sent",
+    "file": "src/http.js",
+    "from": "'method', { status: 401 }",
+    "to": "'method', { status: 401, sent: true }"
+  },
+  {
+    "name": "P1 confirm read with the channel still on",
+    "file": "src/session.js",
+    "from": "    this.timer = undefined;\n    this.stopListening();\n    this.currentRead?.abort();\n    for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);\n    this.followTimers.clear();\n    this.checking",
+    "to": "    this.timer = undefined;\n    this.currentRead?.abort();\n    for (const timer of this.followTimers) this.app.timers.clearTimeout(timer);\n    this.followTimers.clear();\n    this.checking"
+  },
+  {
+    "name": "P2 confirm read does not wait for commands",
+    "file": "src/session.js",
+    "from": "        await this.commandChain;",
+    "to": "        void 0;"
+  },
+  {
+    "name": "P3 opening not refused while checking",
+    "file": "src/session.js",
+    "from": "if (this.checking) refuse(T.checkingReason);",
+    "to": "void 0;"
+  },
+  {
+    "name": "P4 channel restarted while checking",
+    "file": "src/session.js",
+    "from": "if (this.listening || this.stopped || this.checking) return;",
+    "to": "if (this.listening || this.stopped) return;"
+  },
+  {
+    "name": "P7 renewal never released",
+    "file": "src/http.js",
+    "from": "    session.renewing = undefined;\n    release();",
+    "to": "    session.renewing = undefined;"
+  },
+  {
+    "name": "P8 stop leaves the held channel read",
+    "file": "src/session.js",
+    "from": "    this.listenController?.abort();\n    this.stopController.abort();",
+    "to": "    this.stopController.abort();"
+  },
+  {
+    "name": "Q1 renewal lock held until the end of a held channel read (r4 I1)",
+    "file": "src/http.js",
+    "from": "            if (holding) holdFor(TIMINGS.renewHold);",
+    "to": "            void 0;"
+  },
+  {
+    "name": "Q2 renewal round never written: lock held to its end",
+    "file": "src/http.js",
+    "from": "      if (holding) holdFor(TIMINGS.connectTimeout);",
+    "to": "      void 0;"
+  },
+  {
+    "name": "Q3 write of a round never reported",
+    "file": "src/http.js",
+    "from": "      req.once('finish', () => onWritten?.());",
+    "to": "      void 0;"
+  },
+  {
+    "name": "Q4 lock kept after the request ends",
+    "file": "src/http.js",
+    "from": "    signal?.removeEventListener('abort', forward);\n    letGo();",
+    "to": "    signal?.removeEventListener('abort', forward);"
+  },
+  {
+    "name": "Q5 waiter out of budget reported unreachable",
+    "file": "src/http.js",
+    "from": "'Another Digest exchange in progress', 'busy'",
+    "to": "'Another Digest exchange in progress', 'offline'"
+  },
+  {
+    "name": "Q6 busy reason dropped",
+    "file": "src/session.js",
+    "from": "      if (err?.kind === 'busy') return T.authBusy;\n",
+    "to": ""
+  },
+  {
+    "name": "Q7 readings during a refusal check",
+    "file": "src/session.js",
+    "from": "if (this.stopped || this.waiting > 0 || this.checking) throw new Skip();",
+    "to": "if (this.stopped || this.waiting > 0) throw new Skip();"
+  },
+  {
+    "name": "Q8 check read signs with an old challenge (3 proofs)",
+    "file": "src/session.js",
+    "from": "        if (this.stopped) return 'failed';\n        // Alone, it starts with no challenge: the device's current nonce is\n        // fetched without a proof, and nobody can replace it before the one\n        // proof of this read (a wrong password costs 2 proofs in all, not 3).\n        this.digest.challenge = undefined;",
+    "to": "        if (this.stopped) return 'failed';"
+  },
+  {
+    "name": "Q9 refused session keeps its challenge (test click: 3 proofs)",
+    "file": "src/session.js",
+    "from": "    // A test click starts again with no challenge (one proof, then the check).\n    this.digest.challenge = undefined;",
+    "to": ""
+  },
+  {
+    "name": "Q10 test click during a check sends its own read",
+    "file": "src/session.js",
+    "from": "    if (this.checking) return checked(await this.checking);",
+    "to": "    void 0;"
+  },
+  {
+    "name": "Q11 reading out of budget behind a Digest exchange taken for unreachable",
+    "file": "src/session.js",
+    "from": "    if (kind === 'busy') return this.app.config.pollMs;\n",
+    "to": ""
   }
 ]

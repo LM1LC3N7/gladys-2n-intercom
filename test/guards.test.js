@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:https';
+import { connect, createServer as createTcpServer } from 'node:net';
 import { mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -718,4 +719,223 @@ test('stop() takes back a command waiting on a slow intercom at once (R11)', asy
   assert.match(ack.error, /rien envoyé/);
   assert.ok(Date.now() - started < 1500, `${Date.now() - started} ms`);
   assert.equal(triggers(s.fake).length, 0);
+});
+
+// --- review r4 ----------------------------------------------------------------------
+
+/** The reading budget in these tests: tells the check's read from a command step (1.5 s). */
+const READ = 1450;
+
+/**
+ * Watches the second identity read of a refusal check: `refuseNext` refuses the
+ * next identity reads (after `refuseDelay` ms); `checkAfterRead` starts a check
+ * as the next cycle identity read answers. The check's read (identity, stop
+ * signal, reading budget) waits for `go()`; `others` lists every other request
+ * in flight when it starts, or started before it ends (0 expected: "alone").
+ */
+function aloneWatch(t) {
+  const w = { refuseNext: 0, refuseDelay: 0, checkAfterRead: false, others: [] };
+  const inFlight = new Set();
+  const gate = new Promise((resolve) => (w.go = resolve));
+  t.after(() => w.go());
+  w.request = (options) => {
+    const info = options.path === '/api/system/info';
+    if (info && w.refuseNext > 0) {
+      w.refuseNext -= 1;
+      w.armed = true;
+      return sleep(w.refuseDelay).then(() => {
+        throw new IntercomError('Credentials refused', 'refused', { status: 401 });
+      });
+    }
+    const stopSignal = w.session().stopController.signal;
+    if (info && w.armed && !w.alone && options.signal === stopSignal && options.timeout === READ) {
+      w.alone = { done: false };
+      w.others.push(...[...inFlight].map((e) => `${e.path} (in flight)`));
+      return gate.then(() => realRequest(options)).finally(() => (w.alone.done = true));
+    }
+    if (w.alone && !w.alone.done) w.others.push(`${options.path} (started)`);
+    const entry = { path: options.path };
+    inFlight.add(entry);
+    options.signal?.addEventListener('abort', () => inFlight.delete(entry), { once: true });
+    const answer = realRequest(options).finally(() => inFlight.delete(entry));
+    if (info && w.checkAfterRead && options.signal !== stopSignal) {
+      w.checkAfterRead = false;
+      return answer.then((value) => {
+        w.armed = true;
+        w.session().confirmRefusal();
+        return value;
+      });
+    }
+    return answer;
+  };
+  w.inFlight = (prefix) => [...inFlight].some((e) => e.path.startsWith(prefix));
+  return w;
+}
+
+async function watched(t, options = {}) {
+  const w = aloneWatch(t);
+  const s = await setup(t, { request: w.request, timings: { readTimeout: READ }, ...options });
+  w.session = s.session;
+  return { s, w };
+}
+
+/** Lets the check's read go, then waits for its outcome. */
+async function checked(s, w) {
+  w.go();
+  await until(() => w.alone?.done && !s.session().checking, 3000);
+}
+
+test('a refusal check from an opening cuts the held channel read first: alone (P1)', async (t) => {
+  const { s, w } = await watched(t);
+  s.fake.pullHoldMs = 10_000;
+  await s.ready();
+  await events(s, () => w.inFlight('/api/log/pull'), 'held channel read');
+  w.refuseNext = 1;
+  const ack = await press(s.gladys, 1);
+  assert.match(ack.error, /rien envoyé \(refus de l’interphone \(401\)\)/);
+  await until(() => w.alone, 3000);
+  await sleep(30);
+  await checked(s, w);
+  assert.deepEqual(w.others, []);
+  assert.equal(s.session().state, 'ok');
+});
+
+test('a refusal check waits for the commands already queued: alone (P2)', async (t) => {
+  const { s, w } = await watched(t);
+  await s.ready();
+  s.fake.latency['/api/switch/caps'] = 100;
+  w.refuseNext = 1;
+  w.refuseDelay = 60;
+  const first = press(s.gladys, 1);
+  const second = press(s.gladys, 1);
+  await until(() => w.alone, 3000);
+  await sleep(50);
+  await checked(s, w);
+  const acks = await Promise.all([first, second]);
+  assert.match(acks[0].error, /rien envoyé/);
+  assert.equal(acks[1].success, true, acks[1].error);
+  assert.deepEqual(w.others, []);
+});
+
+test('during a refusal check an opening is refused at once, nothing sent (P3)', async (t) => {
+  const { s, w } = await watched(t);
+  await s.ready();
+  w.refuseNext = 1;
+  s.session().schedule(0);
+  await s.step(0);
+  await until(() => w.alone, 3000);
+  const ack = await press(s.gladys, 1);
+  assert.match(ack.error, /rien envoyé \(identifiants en cours de vérification\)/);
+  await sleep(30);
+  await checked(s, w);
+  assert.deepEqual(w.others, []);
+  assert.equal(triggers(s.fake).length, 0);
+});
+
+test('during a refusal check neither the channel nor the readings start again (P4)', async (t) => {
+  const { s, w } = await watched(t);
+  await s.ready();
+  w.checkAfterRead = true;
+  s.session().schedule(0);
+  await s.step(0);
+  await until(() => w.alone, 3000);
+  for (let i = 0; i < 3; i += 1) {
+    await s.advance(POLL);
+    await sleep(20);
+  }
+  assert.equal(s.session().listening, false);
+  await checked(s, w);
+  assert.deepEqual(w.others, []);
+});
+
+test('a test click during a refusal check waits for its outcome, no request of its own', async (t) => {
+  const { s, w } = await watched(t);
+  await s.ready();
+  w.refuseNext = 1;
+  s.session().schedule(0);
+  await s.step(0);
+  await until(() => w.alone, 3000);
+  const click = within(s.gladys.fake.action('test_connection'), 5000);
+  await sleep(50);
+  await checked(s, w);
+  assert.match(said(await click), /connexion…/);
+  assert.deepEqual(w.others, []);
+});
+
+test('a wrong password costs 2 proofs, 2 again per test click, whatever the nonce (M1 r4)', async (t) => {
+  for (const nonceEach401 of [false, true]) {
+    const s = await setup(t, { fake: { nonceEach401, password: 'other' } });
+    const proofs = () => s.fake.requests.filter((r) => r.headers.authorization).length;
+    await s.step(0);
+    await until(() => s.session().state === 'refused');
+    assert.equal(proofs(), 2, `nonceEach401=${nonceEach401}`);
+    const answer = await within(s.gladys.fake.action('test_connection'), 5000);
+    assert.match(said(answer), /identifiants refusés/);
+    assert.equal(proofs(), 4, `nonceEach401=${nonceEach401}, test click`);
+    await s.app.stop();
+  }
+});
+
+test('an opening out of budget behind another Digest exchange: "authentication in progress" (I1 r4)', async (t) => {
+  const s = await setup(t);
+  await s.ready();
+  s.session().digest.renewing = new Promise(() => {}); // held by another request
+  const ack = await press(s.gladys, 1);
+  s.session().digest.renewing = undefined;
+  assert.match(ack.error, /rien envoyé \(authentification Digest en cours avec l’interphone\)/);
+  assert.equal(triggers(s.fake).length, 0);
+});
+
+test('a reading out of budget behind another Digest exchange: state and channel kept (I1 r4)', async (t) => {
+  const s = await setup(t);
+  await s.ready();
+  await events(s, () => s.session().channel !== undefined, 'channel');
+  s.session().digest.renewing = new Promise(() => {}); // held by another request
+  s.session().schedule(0);
+  await s.step(0);
+  await until(() => s.session().timer !== undefined && !s.session().currentRead, 4000);
+  s.session().digest.renewing = undefined;
+  assert.equal(s.session().state, 'ok');
+  assert.equal(s.session().listening, true);
+});
+
+test('a Digest renewal round not written in 3 s gives the lock back (I1 r4)', async (t) => {
+  const fake = await startFake2N();
+  t.after(() => fake.close());
+  // The second connection (the renewal round) is accepted, never answered.
+  let n = 0;
+  const sockets = new Set();
+  const proxy = createTcpServer((socket) => {
+    n += 1;
+    sockets.add(socket);
+    socket.on('error', () => {});
+    if (n === 2) return;
+    const up = connect(fake.port, '127.0.0.1');
+    sockets.add(up);
+    up.on('error', () => socket.destroy());
+    socket.on('close', () => up.destroy());
+    socket.pipe(up).pipe(socket);
+  });
+  await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    for (const socket of sockets) socket.destroy();
+    return new Promise((resolve) => proxy.close(resolve));
+  });
+  const host = { address: '127.0.0.1', port: proxy.address().port, key: 'proxy' };
+  const session = {};
+  const auth = { mode: 'digest', username: USER, password: PASSWORD };
+  const o = (path, timeout) => ({ host, pins: [FP], auth, session, path, timeout });
+  const taken = new AbortController();
+  const renewer = realRequest({ ...o('/api/system/info', 8000), signal: taken.signal }).catch(
+    (err) => err,
+  );
+  await until(() => session.renewing !== undefined);
+  const started = Date.now();
+  const other = await realRequest(o('/api/switch/status', 5000));
+  const took = Date.now() - started;
+  taken.abort();
+  assert.equal(other.status, 200);
+  assert.ok(took > 2500 && took < 4500, `${took} ms`);
+  assert.equal((await renewer).kind, 'aborted');
+  assert.equal(session.renewing, undefined);
 });

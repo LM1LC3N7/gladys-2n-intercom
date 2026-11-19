@@ -36,6 +36,7 @@ import { own, safeJson } from './json.js';
  * - `nopin`: no certificate trusted for this address (nothing sent);
  * - `pin`: the device shows another certificate (nothing sent; `fingerprint` seen);
  * - `offline`: no connection (nothing sent);
+ * - `busy`: its budget spent waiting for another Digest exchange (nothing sent);
  * - `withdrawn`: `beforeSend` said no (nothing sent);
  * - `aborted`: taken back by the caller (sent if `sent`);
  * - `timeout`: no (complete) answer in time;
@@ -165,7 +166,7 @@ export function readFingerprint(host, timeout = TIMINGS.connectTimeout) {
 }
 
 /** One HTTP exchange on a new pinned connection. Resolves { status, headers, text }. */
-function exchange({ host, pins, method, path, headers, signal, beforeSend, maxBody }) {
+function exchange({ host, pins, method, path, headers, signal, beforeSend, maxBody, onWritten }) {
   return new Promise((resolve, reject) => {
     if (!pins?.length) {
       reject(new IntercomError('No certificate trusted', 'nopin'));
@@ -271,6 +272,8 @@ function exchange({ host, pins, method, path, headers, signal, beforeSend, maxBo
         done(reject, new IntercomError('Connection lost', 'lost', { sent: true }));
         kill();
       });
+      // Handed to the system: the device judges a Digest proof when it gets it.
+      req.once('finish', () => onWritten?.());
       req.end();
     });
   });
@@ -316,14 +319,32 @@ export async function request({
   if (signal?.aborted) controller.abort();
   signal?.addEventListener('abort', forward, { once: true });
   let sentOnce = false;
-  // One Digest renewal at a time per intercom (`session.renewing`): a
-  // request that gets a new challenge while another one is renewing waits
-  // for its outcome instead of racing it (a device that keeps ONE nonce and
-  // replaces it at every 401 would refuse one of them).
-  let renewer = false;
+  // One Digest exchange at a time per intercom (`session.renewing`): a round
+  // that answers a new challenge (any round after the first) holds the lock;
+  // every other round waits for it instead of racing it (a device that keeps
+  // ONE nonce and replaces it at every 401 would refuse one of them). The
+  // lock is given back as soon as the device has judged that round: its
+  // answer, or `renewHold` after it was written (the device judges the nonce
+  // when the request arrives; a channel read it accepts is held up to 20 s
+  // with no answer), or `connectTimeout` if it was not written by then. So a
+  // held channel read never holds the commands and the readings back.
+  let holding = false;
   let release;
+  let holdTimer;
+  const letGo = () => {
+    clearTimeout(holdTimer);
+    holdTimer = undefined;
+    if (!holding) return;
+    holding = false;
+    session.renewing = undefined;
+    release();
+  };
+  const holdFor = (ms) => {
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(letGo, ms);
+  };
   const waitRenewal = async () => {
-    while (auth.mode === 'digest' && session.renewing && !renewer) {
+    while (auth.mode === 'digest' && session.renewing && !holding) {
       await new Promise((resolve, reject) => {
         const onAbort = () => reject(new IntercomError('Taken back', 'aborted'));
         if (controller.signal.aborted) {
@@ -343,8 +364,15 @@ export async function request({
       try {
         await waitRenewal();
       } catch (err) {
-        throw timedOut ? new IntercomError('Connection timed out', 'offline') : err;
+        // Its budget spent waiting for another request's Digest exchange:
+        // nothing sent, the device was not found unreachable.
+        throw timedOut ? new IntercomError('Another Digest exchange in progress', 'busy') : err;
       }
+      if (round > 0 && auth.mode === 'digest' && !holding) {
+        holding = true;
+        session.renewing = new Promise((resolve) => (release = resolve));
+      }
+      if (holding) holdFor(TIMINGS.connectTimeout);
       const headers = {};
       // The challenge this round signs with (shared with other requests in
       // flight, which may replace it meanwhile): a 401 is judged against it.
@@ -376,6 +404,9 @@ export async function request({
           signal: controller.signal,
           beforeSend,
           maxBody,
+          onWritten: () => {
+            if (holding) holdFor(TIMINGS.renewHold);
+          },
         });
       } catch (err) {
         if (err.kind === 'aborted' && timedOut) {
@@ -410,13 +441,8 @@ export async function request({
         session.challenge = digest;
         session.nc = 0;
       }
-      if (fresh && round === 0) {
-        if (!session.renewing) {
-          renewer = true;
-          session.renewing = new Promise((resolve) => (release = resolve));
-        }
-        continue;
-      }
+      // Another round follows (the lock, if still held, is kept for it).
+      if (fresh && round === 0) continue;
       if (fresh && stale) {
         if (round < 2) continue;
         // Our proof was only out of date (stale=true): nothing judged.
@@ -448,9 +474,6 @@ export async function request({
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', forward);
-    if (renewer) {
-      session.renewing = undefined;
-      release();
-    }
+    letGo();
   }
 }

@@ -93,6 +93,15 @@ this trigger does not loop).
   restart, until you change the credentials, save the configuration or click **Test the connection**.
   A refusal on another function (missing privilege) is no credentials refusal: that function is asked
   again after 1 min, then doubling up to 1 h.
+- A wrong password is tried twice (one Digest proof, or the Basic header, per identity read) before it is
+  kept, 3 times at most if the password changes on the intercom while the integration runs; then no
+  automatic try at all. Each click on **Test the connection** costs 2 tries again (one click every 5 s at
+  most). The 2N documentation lists a `LoginBlocked` event after 3 wrong logins to the web interface; it
+  does not say whether API failures count too. If the intercom blocks the address of Gladys, wait for the
+  block to end before testing new credentials.
+- With Digest, one request at a time answers a new challenge of the intercom; the others wait for its answer,
+  0.5 s at most after it is sent (3.5 s if the connection to the intercom is slow), even when it is a
+  channel read the intercom holds open up to 20 s.
 - An activation is "confirmed" only when the state of the switch could be read right before it. Beyond
   about 650 ms per answer of the intercom, that read is skipped to leave the activation its time: it still
   goes, but is only "accepted".

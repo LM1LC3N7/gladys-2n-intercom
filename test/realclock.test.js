@@ -14,7 +14,7 @@ import { IntercomApp } from '../src/app.js';
 import { registerHandlers } from '../src/handlers.js';
 import { Session } from '../src/session.js';
 import { MemoryStore } from '../src/store.js';
-import { FP, startFake2N } from './helpers/fake2n.js';
+import { FP, PASSWORD, USER, startFake2N } from './helpers/fake2n.js';
 import { sleep, until, within } from './helpers/app.js';
 
 /** The app on the real clock, `speed` times faster. */
@@ -272,4 +272,52 @@ test('real clock: with less than 2 s left, the state before an opening is not ev
   const trigger = after.indexOf('/api/switch/ctrl?1');
   assert.ok(trigger > 0, JSON.stringify(after));
   assert.ok(!after.slice(0, trigger).includes('/api/switch/status?1'), JSON.stringify(after));
+});
+
+test('real clock: a held channel read renews an expired Digest nonce; openings and readings do not wait for it (I1 r4)', async (t) => {
+  for (const nonceEach401 of [false, true]) {
+    for (const what of ['open', 'read']) {
+      const fake = await startFake2N({ nonceEach401 });
+      fake.pullHoldMs = 4000; // a real device holds the read up to 20 s
+      t.after(() => fake.close());
+      const digest = { auth: 'digest', username: USER, password: PASSWORD };
+      const { gladys, app } = realApp(t, [fake], 1, digest);
+      await within(gladys.connect(), 5000);
+      const session = () => [...app.sessions.values()][0];
+      await until(() => session()?.state === 'ok' && session().caps.size, 5000);
+      const held = (from) =>
+        fake.requests.slice(from).some((r) => r.path === '/api/log/pull' && r.authorized);
+      await until(() => held(0), 5000);
+      await sleep(100);
+      // The device expires its nonce; the held read answers an event, the next
+      // one gets the 401 and renews: its second round is held 4 s.
+      fake.nonce = `expired${nonceEach401 ? 'E' : 'F'}0123456789abcdef`;
+      const mark = fake.requests.length;
+      fake.push('InputChanged', { port: 'input1', state: true });
+      await until(() => held(mark), 3000);
+      const label = `nonceEach401=${nonceEach401}, ${what}`;
+      assert.equal(fake.requests.slice(mark).find((r) => !r.authorized)?.path, '/api/log/pull');
+      const started = performance.now();
+      if (what === 'open') {
+        const ack = await within(
+          gladys.fake.setValue(
+            { external_id: 'ext:2n-intercom:2n:54-0123-4567' },
+            { external_id: 'ext:2n-intercom:2n:54-0123-4567:switch-1:open' },
+            1,
+          ),
+          5000,
+        );
+        assert.equal(ack.success, true, `${label}: ${ack.error}`);
+        assert.equal(fake.count('/api/switch/ctrl'), 1, label);
+      } else {
+        const asked = fake.count('/api/system/info');
+        session().schedule(0);
+        await until(() => fake.count('/api/system/info') > asked, 2500);
+      }
+      const took = performance.now() - started;
+      assert.ok(took < 2500, `${label}: ${Math.round(took)} ms`);
+      assert.equal(session().state, 'ok', label);
+      await app.stop();
+    }
+  }
 });

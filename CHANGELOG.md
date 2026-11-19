@@ -23,4 +23,7 @@ the notes of the version's GitHub Release.
 - Refused credentials kept in `/data` (a salted 8-bit fingerprint) so an
   intercom is not asked again in a loop; lifted by new credentials, a saved
   configuration or the test button; `/data` read again every 10 s while
-  unreadable.
+  unreadable. A refusal is kept only when a second identity read, made
+  alone, is refused too: a wrong password costs 2 proofs (3 at most).
+- Digest: one exchange at a time per intercom, without a held channel read
+  ever blocking the openings.
