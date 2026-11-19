@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-19
+
 ### Added
 
 - First version: 2N IP intercoms and access units over their official local
@@ -27,3 +29,6 @@ the notes of the version's GitHub Release.
   alone, is refused too: a wrong password costs 2 proofs (3 at most).
 - Digest: one exchange at a time per intercom, without a held channel read
   ever blocking the openings.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-2n-intercom/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-2n-intercom/releases/tag/v0.1.1

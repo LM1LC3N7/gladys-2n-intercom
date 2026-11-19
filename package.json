@@ -1,6 +1,6 @@
 {
   "name": "gladys-2n-intercom",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for 2N IP intercoms (doorbell, door switches, inputs, access events), over their local HTTPS API. Unofficial, not affiliated with 2N.",
   "type": "module",
